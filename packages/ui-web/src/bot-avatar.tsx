@@ -20,8 +20,10 @@ import {
   shippedBotAvatarShapePath,
 } from "@rakazo/core";
 import type { ComponentProps, CSSProperties } from "react";
-import { memo, useEffect, useId, useMemo, useSyncExternalStore } from "react";
+import { memo, useEffect, useId, useMemo, useRef, useSyncExternalStore } from "react";
 import { useBotAvatarActivity } from "./bot-avatar-activity.js";
+import type { AvatarLookRange } from "./hooks/use-avatar-look.js";
+import { useAvatarLook } from "./hooks/use-avatar-look.js";
 import { useAvatarMotionVisibility } from "./hooks/use-avatar-motion-visibility.js";
 import { cn } from "./lib/utils.js";
 import { LogoAvatar } from "./logo-avatar.js";
@@ -39,6 +41,10 @@ export const BOT_MASCOT_SHAPES = SHIPPED_SHAPE_KEYS.map(
 );
 
 const FALLBACK_SHAPE_PATH = BOT_SHAPES.hex ?? "";
+
+/** How far the eyes travel toward the pointer, in each avatar's viewBox units. */
+const ORGANIC_LOOK_RANGE: AvatarLookRange = { x: 10, y: 7 };
+const SHAPE_LOOK_RANGE: AvatarLookRange = { x: 20, y: 14 };
 
 export function parseBotAvatar(
   rawColor: string,
@@ -98,6 +104,9 @@ export const BotAvatar = memo(function BotAvatar({
 }: BotAvatarProps) {
   const id = useId().replace(/[^a-zA-Z0-9-_]/g, "");
   const isWorking = ACTIVE_RUN_STATUSES.some((s) => s === status);
+  // Only the shape avatar below uses this; the organic and logo avatars watch the pointer themselves.
+  const shapeRef = useRef<HTMLDivElement>(null);
+  useAvatarLook(shapeRef, SHAPE_LOOK_RANGE, size >= 20);
 
   const parsed = useMemo(() => parseBotAvatar(color, identity), [color, identity]);
   const effectiveId = identity || parsed.color || "agent";
@@ -171,6 +180,7 @@ export const BotAvatar = memo(function BotAvatar({
 
   return (
     <div
+      ref={shapeRef}
       className={cn(
         "rakazo-bot-avatar bot-avatar-container relative inline-flex items-center justify-center shrink-0 select-none",
         className,
@@ -231,8 +241,10 @@ export const BotAvatar = memo(function BotAvatar({
       >
         <g>
           <path d={shippedBotAvatarShapePath(parsed.shapeIndex)} fill={colorDef.hex} />
-          <g className={cn("bot-character-eyes", eyeFill(colorDef.hex))}>
-            <BarEyes eyes={SHIPPED_BOT_AVATAR_EYES} />
+          <g className="rakazo-avatar-look">
+            <g className={cn("bot-character-eyes", eyeFill(colorDef.hex))}>
+              <BarEyes eyes={SHIPPED_BOT_AVATAR_EYES} />
+            </g>
           </g>
         </g>
       </svg>
@@ -273,6 +285,7 @@ function OrganicAvatar({
     if (visible) ref.current?.unpauseAnimations?.();
     else ref.current?.pauseAnimations?.();
   }, [ref, visible]);
+  useAvatarLook(ref, ORGANIC_LOOK_RANGE, size >= 20);
   const seed = avatarIdentitySeed(identity || color || DEFAULT_BOT_AVATAR_COLOR);
   const duration = `${4.8 + (seed % 24) / 10}s`;
   const shapeA = organicAvatarPath(seed);
@@ -321,15 +334,17 @@ function OrganicAvatar({
           ) : null}
         </path>
       ))}
-      <g transform={`rotate(${organicAvatarEyeTilt(seed)})`}>
-        {(["idle", "working"] as const).map((mode) => (
-          <g
-            key={mode}
-            className={`rakazo-organic-avatar-eyes rakazo-organic-avatar-eyes-${mode} ${eyeFill(color)}`}
-          >
-            <BarEyes eyes={ORGANIC_AVATAR_EYES} />
-          </g>
-        ))}
+      <g className="rakazo-avatar-look">
+        <g transform={`rotate(${organicAvatarEyeTilt(seed)})`}>
+          {(["idle", "working"] as const).map((mode) => (
+            <g
+              key={mode}
+              className={`rakazo-organic-avatar-eyes rakazo-organic-avatar-eyes-${mode} ${eyeFill(color)}`}
+            >
+              <BarEyes eyes={ORGANIC_AVATAR_EYES} />
+            </g>
+          ))}
+        </g>
       </g>
     </svg>
   );

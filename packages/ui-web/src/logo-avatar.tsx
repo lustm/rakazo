@@ -10,6 +10,8 @@ import {
 import { botEyeColor, tokens } from "@rakazo/ui-tokens";
 import type { CSSProperties } from "react";
 import { memo, useId, useMemo } from "react";
+import type { AvatarLookRange } from "./hooks/use-avatar-look.js";
+import { useAvatarLook } from "./hooks/use-avatar-look.js";
 import { useAvatarMotionVisibility } from "./hooks/use-avatar-motion-visibility.js";
 import { useLogoAvatarLayers } from "./hooks/use-logo-avatar-layers.js";
 import { cn } from "./lib/utils.js";
@@ -18,6 +20,8 @@ import "./logo-avatar.css";
 
 /** Generated vector logo renderer. BotAvatar owns set selection and custom images. */
 const eyes = LOGO_AVATAR_EYES;
+/** How far the eyes travel toward the pointer, in viewBox units (the plate is 100 wide). */
+const LOGO_LOOK_RANGE: AvatarLookRange = { x: 8, y: 6 };
 
 export const LogoAvatar = memo(function LogoAvatar({
   activity = "idle",
@@ -57,6 +61,7 @@ export const LogoAvatar = memo(function LogoAvatar({
     canMove && visible && !reducedMotion,
     canMove,
   );
+  useAvatarLook(ref, LOGO_LOOK_RANGE, size >= 20);
   const eyeInk = logoAvatarEyeInk(traits.color, tokens);
   return (
     <svg
@@ -125,35 +130,37 @@ export const LogoAvatar = memo(function LogoAvatar({
                   color={traits.color}
                   originalOrange={traits.originalOrange}
                 />
-                <g className="logo-avatar-gaze">
-                  <g className="logo-avatar-scan">
-                    {[eyes.leftCx, eyes.rightCx].map((x, index) => (
-                      <g
-                        className={`logo-avatar-eye-lid logo-avatar-eye-${index}`}
-                        key={x}
-                        style={{ transformOrigin: `${x}px ${eyes.cy}px` }}
-                      >
+                <g className="rakazo-avatar-look">
+                  <g className="logo-avatar-gaze">
+                    <g className="logo-avatar-scan">
+                      {[eyes.leftCx, eyes.rightCx].map((x, index) => (
                         <g
-                          className="logo-avatar-eye"
+                          className={`logo-avatar-eye-lid logo-avatar-eye-${index}`}
+                          key={x}
                           style={{ transformOrigin: `${x}px ${eyes.cy}px` }}
                         >
-                          <ellipse
-                            cx={x}
-                            cy={eyes.cy}
-                            rx={eyes.width / 2}
-                            ry={eyes.height / 2}
-                            fill={`url(#logo-eye-${id})`}
-                          />
-                          <ellipse
-                            className="logo-avatar-glint"
-                            cx={x - 1.2}
-                            cy={eyes.cy - 3.6}
-                            rx="1.4"
-                            ry="2.2"
-                          />
+                          <g
+                            className="logo-avatar-eye"
+                            style={{ transformOrigin: `${x}px ${eyes.cy}px` }}
+                          >
+                            <ellipse
+                              cx={x}
+                              cy={eyes.cy}
+                              rx={eyes.width / 2}
+                              ry={eyes.height / 2}
+                              fill={`url(#logo-eye-${id})`}
+                            />
+                            <ellipse
+                              className="logo-avatar-glint"
+                              cx={x - 1.2}
+                              cy={eyes.cy - 3.6}
+                              rx="1.4"
+                              ry="2.2"
+                            />
+                          </g>
                         </g>
-                      </g>
-                    ))}
+                      ))}
+                    </g>
                   </g>
                 </g>
               </g>

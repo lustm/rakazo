@@ -41,12 +41,16 @@ export function CollaborationMarker({
   );
 }
 
-/** The working bot with what it is doing right now, such as its current tool call. */
+/**
+ * The working bot with what it is doing right now, such as its current tool call. Its eyes glance
+ * around while it works (rk-working-glyph), a highlight sweeps the phrase and rests (rk-sheen), and
+ * a new phrase fades in (keyed by its text) instead of swapping in place.
+ */
 export function ActiveBotGlyph({ bots, label }: { bots: GroupAvatarMember[]; label: string }) {
   return (
-    <div role="status" className="flex min-h-10 min-w-0 items-center gap-2.5 px-1">
+    <div role="status" className="rk-working-glyph flex min-h-10 min-w-0 items-center gap-2.5 px-1">
       <GroupAvatar members={bots} size={28} />
-      <span dir="auto" className="min-w-0 truncate text-[15px] text-muted-foreground text-shimmer">
+      <span key={label} dir="auto" className="rk-sheen rk-phrase-in min-w-0 truncate text-[15px]">
         {label}
       </span>
     </div>

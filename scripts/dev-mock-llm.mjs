@@ -5,6 +5,8 @@ import http from "node:http";
 // Matches RAKAZO_LOCAL_MODELS_URL=http://127.0.0.1:11999/v1 in a local .env.
 const PORT = 11999;
 const MODEL = "mock-streamer";
+/** Time before the first token, like a model that thinks first; shows the "working" row. */
+const FIRST_TOKEN_DELAY_MS = 2500;
 
 const REPLY = `好的，我来整理一下这周的进展。
 
@@ -104,7 +106,7 @@ http
       model: MODEL,
       choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }],
     });
-    await sleep(380);
+    await sleep(FIRST_TOKEN_DELAY_MS);
     for (const piece of chunks(text)) {
       if (res.destroyed) return;
       send({

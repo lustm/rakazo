@@ -59,6 +59,8 @@ import { MarkdownTable, MarkdownTableSourceContext } from "./markdown-table";
 import { isMermaidFence, mermaidSvgImage } from "./mermaid";
 import { useMermaidSvg } from "./mermaid.web";
 import { PAGE_ICON } from "./page-icon";
+import { useSmoothText } from "./smooth-text";
+import { rehypeStreamWords } from "./stream-words";
 
 function preserveSkippedTableText() {
   return (tree: HastNode) => {
@@ -746,6 +748,13 @@ export function LinkifiedText({
 
 const remarkPlugins = [remarkGfm];
 const rehypePlugins = [preserveSkippedTableText];
+const streamingRehypePlugins = [preserveSkippedTableText, rehypeStreamWords];
+
+/**
+ * Streaming polish: paced text and word fade-in for replies that are still streaming. Off unless
+ * an app opts in, so other renderers (and markup tests) see streamed text exactly as it arrives.
+ */
+export const StreamingPolishContext = createContext(false);
 
 // MarkdownImage decides what an image source may do, so it receives the source as written.
 function urlTransform(url: string, key: string) {
@@ -757,9 +766,11 @@ function urlTransform(url: string, key: string) {
 const MarkdownBlock = memo(function MarkdownBlock({
   source,
   streaming,
+  polish = false,
 }: {
   source: string;
   streaming: boolean;
+  polish?: boolean;
 }) {
   const parsed = streaming ? closeUnterminatedFence(source) : source;
   return (
@@ -768,7 +779,7 @@ const MarkdownBlock = memo(function MarkdownBlock({
         <ReactMarkdown
           components={components}
           remarkPlugins={remarkPlugins}
-          rehypePlugins={rehypePlugins}
+          rehypePlugins={streaming && polish ? streamingRehypePlugins : rehypePlugins}
           skipHtml
           urlTransform={urlTransform}
         >
@@ -820,11 +831,15 @@ function splitSource(text: string, previous: SplitSource | undefined): SplitSour
 }
 
 export const ChatMarkdown = memo(function ChatMarkdown({
-  children,
-  streaming = false,
+  children: source,
+  streaming: sourceStreaming = false,
   renderMention,
   onOpenPage,
 }: ChatMarkdownProps) {
+  // Pace streamed text, and keep the streaming look until the paced text has caught up.
+  const polish = useContext(StreamingPolishContext);
+  const children = useSmoothText(source, polish && sourceStreaming);
+  const streaming = sourceStreaming || children.length < source.length;
   const { request, dialog } = useExternalLinkConfirm();
   // A streamed reply stays split once it finishes, so its blocks are not drawn again.
   const [split, setSplit] = useState(streaming);
@@ -853,11 +868,12 @@ export const ChatMarkdown = memo(function ChatMarkdown({
                     <MarkdownBlock
                       source={block.source}
                       streaming={streaming && index === blocks.length - 1}
+                      polish={polish}
                     />
                   </Fragment>
                 ))
               ) : (
-                <MarkdownBlock source={children} streaming={streaming} />
+                <MarkdownBlock source={children} streaming={streaming} polish={polish} />
               )}
             </PlainTextOnFailure>
           </LinkFaviconsPausedContext.Provider>

@@ -1,6 +1,10 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { LinkFavicons } from "@rakazo/chat-ui/web";
-import { LinkFaviconsContext, RemoteImagesContext } from "@rakazo/chat-ui/web";
+import {
+  LinkFaviconsContext,
+  RemoteImagesContext,
+  StreamingPolishContext,
+} from "@rakazo/chat-ui/web";
 import { analyticsScreen } from "@rakazo/core";
 import { Button } from "@rakazo/ui-web";
 import {
@@ -91,15 +95,17 @@ export function App() {
   return (
     <RemoteImagesContext.Provider value={loadRemoteImages}>
       <LinkFaviconsContext.Provider value={linkFavicons}>
-        <ErrorBoundary fallback={<AppFailed />}>
-          {window.location.pathname === SSO_CALLBACK_PATH ? (
-            <SsoCallbackPage />
-          ) : window.location.pathname === "/integrations/callback" ? (
-            <IntegrationCallbackPage />
-          ) : (
-            <SessionApp />
-          )}
-        </ErrorBoundary>
+        <StreamingPolishContext.Provider value={true}>
+          <ErrorBoundary fallback={<AppFailed />}>
+            {window.location.pathname === SSO_CALLBACK_PATH ? (
+              <SsoCallbackPage />
+            ) : window.location.pathname === "/integrations/callback" ? (
+              <IntegrationCallbackPage />
+            ) : (
+              <SessionApp />
+            )}
+          </ErrorBoundary>
+        </StreamingPolishContext.Provider>
       </LinkFaviconsContext.Provider>
     </RemoteImagesContext.Provider>
   );

@@ -228,6 +228,21 @@ export const Transcript = memo(function Transcript({
   );
   const separatorIds = timeSeparatorIds(shownMessages);
   const unreadDividerId = unreadDividerMessageId(shownMessages, unreadAfterSeq, olderCursor);
+  // Messages that arrive while the chat is open slide in. A chat's history (first paint,
+  // another chat, older pages) arrives many at a time and does not animate. A message keeps its
+  // class once given, so a re-render never cuts its animation short.
+  const knownMessageIds = useRef<Set<string> | null>(null);
+  const enteringMessageIds = useRef(new Set<string>());
+  if (knownMessageIds.current) {
+    const known = knownMessageIds.current;
+    const arrived = shownMessages.filter((message) => !known.has(message.id));
+    if (arrived.length > 0 && arrived.length <= 2) {
+      for (const message of arrived) enteringMessageIds.current.add(message.id);
+    }
+  }
+  useEffect(() => {
+    knownMessageIds.current = new Set(shownMessages.map((message) => message.id));
+  });
   const workingLabel = liveActivityLine(messages) ?? t`Working…`;
   const [quoteDraft, setQuoteDraft] = useState<{
     message: ThreadMessage;
@@ -399,6 +414,52 @@ export const Transcript = memo(function Transcript({
     onScrollRequestHandled();
   }, [messages, scrollRequest, scrollRef, endJumpScroll, onScrollRequestHandled, exchanges.lineOf]);
 
+  // Glide to the newest content instead of jumping to it, while the reader follows the tail.
+  // Each frame closes part of the remaining gap, so bursts of text read as one smooth motion.
+  // autoScrolling keeps onScroll from treating a gap above the near-end threshold as the
+  // reader scrolling away; any reader input clears following and stops the glide.
+  const glideFrame = useRef(0);
+  const glideToEnd = useCallback(() => {
+    if (glideFrame.current) return;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const step = () => {
+      glideFrame.current = 0;
+      const element = scrollRef.current;
+      if (!element || !following.current || jumpScrolling.current) return;
+      const gap = element.scrollHeight - element.clientHeight - element.scrollTop;
+      if (gap < 1) {
+        autoScrolling.current = false;
+        return;
+      }
+      autoScrolling.current = true;
+      element.scrollTop += reducedMotion ? gap : Math.max(1, Math.ceil(gap * 0.2));
+      glideFrame.current = window.requestAnimationFrame(step);
+    };
+    glideFrame.current = window.requestAnimationFrame(step);
+  }, [scrollRef]);
+
+  // Rows grow without a messages change (paced streaming text, images, diagrams), so follow
+  // their size as well as the message list.
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const resize = new ResizeObserver(() => {
+      if (following.current && !jumpScrolling.current) glideToEnd();
+    });
+    const observeRows = () => {
+      for (const child of Array.from(element.children)) resize.observe(child);
+    };
+    observeRows();
+    const added = new MutationObserver(observeRows);
+    added.observe(element, { childList: true });
+    return () => {
+      resize.disconnect();
+      added.disconnect();
+      window.cancelAnimationFrame(glideFrame.current);
+      glideFrame.current = 0;
+    };
+  }, [scrollRef, glideToEnd]);
+
   const followedRequest = useRef(followRequest);
   useLayoutEffect(() => {
     if (followedRequest.current === followRequest) return;
@@ -408,10 +469,15 @@ export const Transcript = memo(function Transcript({
 
   useLayoutEffect(() => {
     const element = scrollRef.current;
-    if (following.current) snapToEnd();
+    if (following.current) {
+      // A short way to go (new text, a new reply) glides; a long one (another chat) jumps.
+      const gap = element ? element.scrollHeight - element.clientHeight - element.scrollTop : 0;
+      if (!element || gap > element.clientHeight) snapToEnd();
+      else glideToEnd();
+    }
     // Content can grow below a reader who is not following without any scroll event.
     else if (element) setAtEnd(transcriptIsNearEnd(element));
-  }, [messages, running, scrollRef, snapToEnd]);
+  }, [messages, running, scrollRef, snapToEnd, glideToEnd]);
 
   useLayoutEffect(() => {
     const button = jumpButtonRef.current;
@@ -551,7 +617,10 @@ export const Transcript = memo(function Transcript({
               ) : null}
               <div
                 data-message-id={message.id}
-                className={peerReceipt ? "relative py-0.5" : "group/message relative hover:z-[1]"}
+                className={cn(
+                  peerReceipt ? "relative py-0.5" : "group/message relative hover:z-[1]",
+                  enteringMessageIds.current.has(message.id) && "rk-message-enter",
+                )}
               >
                 <div
                   className={

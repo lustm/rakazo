@@ -1,0 +1,52 @@
+name: build-app
+
+# Fork-only: builds the single `app` image (api, worker, web, supervisor) for linux/amd64
+# and pushes it to ghcr.io/<owner>/<repo>/app:sha-<commit>. The upstream
+# publish-server-image workflow builds three images for two architectures; this fork only
+# changes the app, and the deployment host is amd64.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [custom]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}/app" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: infra/compose/Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: GIT_SHA=${{ github.sha }}
+          tags: |
+            ${{ steps.image.outputs.name }}:sha-${{ github.sha }}
+            ${{ steps.image.outputs.name }}:custom
+          cache-from: type=gha,scope=app-amd64
+          cache-to: type=gha,mode=max,scope=app-amd64
+          provenance: false
+      - run: |
+          echo "### Image" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`${{ steps.image.outputs.name }}:sha-${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"

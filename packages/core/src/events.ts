@@ -220,14 +220,14 @@ export function isRunTerminalEvent(event: { type: string }): boolean {
 export const RESPONSE_STREAMING_STORAGE_KEY = "rakazo.responseStreaming";
 export type ResponseStreamingPreference = "on" | "off";
 
-/** Missing and unknown values stay off; only an explicit "on" enables streaming. */
+/** Fork default: streaming is on unless the person explicitly saved "off". */
 export function normalizeResponseStreamingPreference(
   raw: string | null | undefined,
 ): ResponseStreamingPreference {
-  return raw?.trim().toLowerCase() === "on" ? "on" : "off";
+  return raw?.trim().toLowerCase() === "off" ? "off" : "on";
 }
 
-export function responseStreamingEnabled(preference: ResponseStreamingPreference = "off"): boolean {
+export function responseStreamingEnabled(preference: ResponseStreamingPreference = "on"): boolean {
   return preference === "on";
 }
 

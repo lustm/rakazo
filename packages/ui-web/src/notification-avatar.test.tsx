@@ -37,8 +37,12 @@ it.each<[string, { color: string; avatarSet?: "rakazo" }]>([
   for (const transform of tags(portrait, "g").flatMap((group) => group.transform ?? [])) {
     expect(chat).toContain(`transform="${transform}"`);
   }
-  const eyes = [...tags(portrait, "rect"), ...tags(portrait, "ellipse")];
+  // Organic eyes are the unfilled paths after the body; the logo's are ellipses.
+  const eyes = [
+    ...tags(portrait, "path").filter((path) => !path.fill),
+    ...tags(portrait, "ellipse"),
+  ];
   expect(eyes).toHaveLength(2);
-  const chatEyes = [...tags(chat, "rect"), ...tags(chat, "ellipse")];
+  const chatEyes = [...tags(chat, "path"), ...tags(chat, "ellipse")];
   for (const eye of eyes) expect(chatEyes).toContainEqual(expect.objectContaining(eye));
 });

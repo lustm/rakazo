@@ -86,9 +86,7 @@ test("organic avatars drift while idle, face a hovering pointer, act busy while 
   const pose = () =>
     avatar.evaluate((svg: SVGSVGElement) => ({
       turn: svg.querySelector("[data-organic-turn]")?.getAttribute("transform"),
-      eyes: [...svg.querySelectorAll("[data-organic-eye]")].map((eye) =>
-        eye.getAttribute("transform"),
-      ),
+      eyes: [...svg.querySelectorAll("[data-organic-eye]")].map((eye) => eye.getAttribute("d")),
     }));
   const moves = async () => {
     const before = await pose();
@@ -96,14 +94,14 @@ test("organic avatars drift while idle, face a hovering pointer, act busy while 
     return JSON.stringify(await pose()) !== JSON.stringify(before);
   };
 
-  // At rest the face drifts on its own, leaning back and looking up and right.
+  // At rest the face drifts on its own while the body holds its resting turn.
   expect(await moves()).toBe(true);
-  expect((await pose()).turn).toMatch(/^rotate\(-1[0-9]/);
+  expect((await pose()).turn).toBe("rotate(0)");
 
-  // Hovering the avatar's centre turns it to face the pointer, upright.
+  // Hovering the avatar's centre turns it upright to face the pointer.
   const box = (await avatar.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await expect.poll(async () => (await pose()).turn).toMatch(/^rotate\(-?0(\.\d+)?\)$/);
+  await expect.poll(async () => (await pose()).turn).toMatch(/^rotate\(1[45](\.\d+)?\)$/);
   await page.mouse.move(box.x + box.width + 200, box.y - 200);
 
   // Working keeps it moving.

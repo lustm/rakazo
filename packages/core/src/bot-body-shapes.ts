@@ -328,7 +328,11 @@ const round = (value: number) => Math.round(value * 100) / 100;
 /** One shape as a smooth closed path, `size` units from its centre to the fitted square's edge. */
 export function botBodyShapePath(index: number, size: number, cx = 0, cy = 0): string {
   const shape = BOT_BODY_SHAPES[index] ?? BOT_BODY_SHAPES[0]!;
-  const points = shape.points.map(([x, y]): Point => [cx + x * size, cy + y * size]);
+  return smoothClosedPath(shape.points.map(([x, y]): Point => [cx + x * size, cy + y * size]));
+}
+
+/** A closed curve through `points` (Catmull-Rom, drawn as cubic Béziers). */
+export function smoothClosedPath(points: readonly Point[]): string {
   const count = points.length;
   const at = (offset: number) => points[(offset + count) % count]!;
   let path = `M${round(at(0)[0])} ${round(at(0)[1])}`;

@@ -4,6 +4,7 @@ import {
   BLINK_DURATION,
   blinkLid,
   createOrganicMotion,
+  FACE_PITCH,
   LOOK_PITCH,
   LOOK_YAW,
   mulberry32,
@@ -44,10 +45,13 @@ describe("organic avatar motion", () => {
     expect(1 - blinkLid(0.1)).toBeGreaterThan(blinkLid(0.55));
   });
 
-  it("aims at a pointer over the avatar, straight ahead at its centre", () => {
-    expect(pointerGaze(0, 0, 40)).toEqual({ yaw: 0, pitch: -0 });
-    expect(pointerGaze(400, -400, 40)).toEqual({ yaw: LOOK_YAW, pitch: LOOK_PITCH });
-    expect(pointerGaze(-24, 24, 40)).toEqual({ yaw: -LOOK_YAW / 2, pitch: -LOOK_PITCH / 2 });
+  it("faces a pointer at its centre and leans the gaze toward one off to a side", () => {
+    expect(pointerGaze(0, 0, 40)).toEqual({ yaw: 0, pitch: FACE_PITCH });
+    // Past 0.7 body radii (11.2 px of a 40 px avatar) along an axis, the gaze turns no further.
+    expect(pointerGaze(400, -400, 40)).toEqual({ yaw: LOOK_YAW, pitch: FACE_PITCH + LOOK_PITCH });
+    const half = pointerGaze(-5.6, 5.6, 40);
+    expect(half.yaw).toBeCloseTo(-LOOK_YAW / 2);
+    expect(half.pitch).toBeCloseTo(FACE_PITCH - LOOK_PITCH / 2);
   });
 
   it("blinks every 1.9 to 4.6 seconds, sometimes twice in quick succession", () => {

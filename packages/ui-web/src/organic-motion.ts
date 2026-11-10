@@ -16,9 +16,13 @@ const TAU = Math.PI * 2;
 export const BLINK_DURATION = 0.18;
 const DOUBLE_BLINK_CHANCE = 0.18;
 const DOUBLE_BLINK_GAP = 0.24;
-/** How far the gaze turns toward a pointer an avatar width or more from its centre. */
-export const LOOK_YAW = 38;
-export const LOOK_PITCH = 32;
+/** Degrees a face looks up while it faces you, so its eyes sit level with the body's middle. */
+export const FACE_PITCH = 14;
+/** How far that gaze turns toward a pointer 0.7 body radii or more off centre along each axis. */
+export const LOOK_YAW = 13.5;
+export const LOOK_PITCH = 10;
+/** A body's radius as a share of the avatar's width (48 of its 120 unit box). */
+const BODY_RADIUS = 0.4;
 const SPIN_DURATION = 0.7;
 const SQUASH_DURATION = 0.45;
 
@@ -34,10 +38,10 @@ export function blinkLid(progress: number): number {
 
 /** Gaze toward a pointer `dx`, `dy` px from the centre of an avatar `width` px wide. */
 export function pointerGaze(dx: number, dy: number, width: number): { yaw: number; pitch: number } {
-  const reach = Math.max(1, width * 1.2);
+  const reach = Math.max(1, width * BODY_RADIUS * 0.7);
   return {
     yaw: clamp(dx / reach, -1, 1) * LOOK_YAW,
-    pitch: -clamp(dy / reach, -1, 1) * LOOK_PITCH,
+    pitch: FACE_PITCH - clamp(dy / reach, -1, 1) * LOOK_PITCH,
   };
 }
 
@@ -120,6 +124,8 @@ export function organicFrame(family: number, pose: OrganicPose): OrganicFrame {
       lean: pose.lean,
       lid: pose.lid,
       round: pose.round,
+      // The resting portrait's per-eye touch-ups fade as the body stands up to face you.
+      portrait: 1 - clamp(Math.abs(pose.roll) / ORGANIC_UPRIGHT_ROLL),
     }),
   };
 }
@@ -137,7 +143,7 @@ interface Beat {
 }
 
 const range = (random: () => number, from: number, to: number) => from + random() * (to - from);
-const FACING: Omit<Targets, "lean"> = { yaw: 0, pitch: 0, roll: 0, round: 0, scale: 1 };
+const FACING: Omit<Targets, "lean"> = { yaw: 0, pitch: FACE_PITCH, roll: 0, round: 0, scale: 1 };
 
 /** The busy moves, weighted by how often they come up. */
 const BEATS: readonly { name: string; weight: number; make: (random: () => number) => Beat }[] = [

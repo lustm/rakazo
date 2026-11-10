@@ -48,15 +48,10 @@ export function applyOrganicFrame(svg: SVGSVGElement, next: OrganicFrame) {
   for (const body of svg.querySelectorAll("[data-organic-body]"))
     body.setAttribute("transform", next.body);
   svg.querySelector("[data-organic-face]")?.setAttribute("transform", next.face);
-  svg.querySelectorAll<SVGRectElement>("[data-organic-eye]").forEach((element, index) => {
+  svg.querySelectorAll<SVGPathElement>("[data-organic-eye]").forEach((element, index) => {
     const eye = next.eyes[index];
     if (!eye) return;
-    element.setAttribute("x", String(eye.x));
-    element.setAttribute("y", String(eye.y));
-    element.setAttribute("width", String(eye.width));
-    element.setAttribute("height", String(eye.height));
-    element.setAttribute("rx", String(eye.rx));
-    element.setAttribute("transform", eye.transform);
+    element.setAttribute("d", eye.d);
     element.setAttribute("opacity", String(eye.opacity));
   });
 }

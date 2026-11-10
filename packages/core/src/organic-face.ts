@@ -1,11 +1,11 @@
 import { ORGANIC_AVATAR_BODY_SIZE } from "./avatar-shape.js";
-import { BOT_BODY_SHAPES } from "./bot-body-shapes.js";
+import { BOT_BODY_SHAPES, smoothClosedPath } from "./bot-body-shapes.js";
 
 /**
  * The organic face: two eyes laid on a ball behind the body, so turning the gaze slides them
- * across it, leans them along its curve and narrows them toward its rim. Every body rests looking
- * up and to the right; each sits its ball, lean and eye size where that body reads best, with a
- * small per-eye correction so the resting face matches the reference exactly.
+ * across it, leans them along its curve, and narrows and bows them toward its rim. Every body
+ * rests looking up and to the right; each sits its ball, lean and eye size where that body reads
+ * best, with a small per-eye correction so the resting face matches the reference exactly.
  */
 
 const DEG = Math.PI / 180;
@@ -13,6 +13,8 @@ const DEG = Math.PI / 180;
 const REST_GAZE = { yaw: 28.5, pitch: 28.6 };
 /** Half the angle between the eyes, around the ball. */
 const EYE_SPLIT = 16.4;
+/** The eyes' meridians curve as on a ball this share of the face's radius. */
+const MERIDIAN_CURVE = 0.75;
 /** Degrees a body turns from its resting tilt to stand upright when it faces you. */
 export const ORGANIC_UPRIGHT_ROLL = 15;
 
@@ -209,6 +211,8 @@ export interface OrganicFacePose {
   lid: number;
   /** 0 capsule eyes, 1 round dots. */
   round: number;
+  /** How much of the resting portrait's per-eye correction applies: 1 at rest, 0 facing you. */
+  portrait: number;
 }
 
 /** How a body rests: where it looks, its outline's turn from resting, and its face's lean. */
@@ -224,50 +228,87 @@ export function organicRestPose(family: number): OrganicRestPose {
 }
 
 export interface OrganicEye {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rx: number;
-  transform: string;
+  /** The eye's outline in the avatar's viewBox. */
+  d: string;
   opacity: number;
 }
 
-const fixed = (value: number) => Math.round(value * 100) / 100;
 const mix = (from: number, to: number, amount: number) => from + (to - from) * amount;
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 
-/** Both eyes for a body `family` in a pose, centred on the origin and placed by `transform`. */
+/** Points per rounded corner; straight sides get points at about the same spacing, so they bend. */
+const CORNER_STEPS = 4;
+const MAX_SIDE_STEPS = 8;
+
+/** A `width` × `height` capsule centred on the origin, as evenly spaced points clockwise. */
+function capsule(width: number, height: number): [number, number][] {
+  const radius = Math.min(width, height) / 2;
+  const [hx, hy] = [width / 2 - radius, height / 2 - radius];
+  const spacing = Math.max(1e-6, (radius * Math.PI) / 2 / CORNER_STEPS);
+  const centres = [
+    [hx, -hy],
+    [hx, hy],
+    [-hx, hy],
+    [-hx, -hy],
+  ] as const;
+  return centres.flatMap(([cx, cy], index) => {
+    const start = (index - 1) * 90;
+    const at = (degrees: number, ox = cx, oy = cy): [number, number] => [
+      ox + radius * Math.cos(degrees * DEG),
+      oy + radius * Math.sin(degrees * DEG),
+    ];
+    const arc = Array.from({ length: CORNER_STEPS }, (_, step) =>
+      at(start + (90 * step) / CORNER_STEPS),
+    );
+    // The straight side from this corner to the next; none when the corners meet.
+    const [nx, ny] = centres[(index + 1) % 4]!;
+    const steps = Math.min(MAX_SIDE_STEPS, Math.round(Math.hypot(nx - cx, ny - cy) / spacing));
+    const [from, to] = [at(start + 90), at(start + 90, nx, ny)];
+    const side = Array.from({ length: steps }, (_, step): [number, number] => [
+      mix(from[0], to[0], step / steps),
+      mix(from[1], to[1], step / steps),
+    ]);
+    return [...arc, ...side];
+  });
+}
+
+/** Both eyes for a body `family` in a pose, drawn on its ball in the avatar's viewBox. */
 export function organicFaceEyes(family: number, pose: OrganicFacePose): [OrganicEye, OrganicEye] {
   const face = faceFor(family);
   const size = ORGANIC_AVATAR_BODY_SIZE;
+  // Eyes bow along a meridian of a ball a little tighter than the face's own: the reference bows a
+  // third more than the face's ball would.
+  const curve = face.radius * size * MERIDIAN_CURVE;
   const pitch = pose.pitch * DEG;
   const lean = pose.lean * DEG;
   const shear = Math.sin(pose.yaw * DEG) * Math.sin(pitch);
   const along = Math.max(0.08, Math.cos(pitch));
   const round = clamp01(pose.round);
   const lid = 0.06 + 0.94 * clamp01(pose.lid);
+  const portrait = clamp01(pose.portrait);
   const eye = (index: 0 | 1): OrganicEye => {
     const fit = face.eyes[index];
     const yaw = (pose.yaw + (index === 0 ? -1 : 1) * EYE_SPLIT) * DEG;
     const across = Math.max(0.08, Math.cos(yaw));
     const lx = face.radius * Math.sin(yaw) * Math.cos(pitch);
     const ly = -face.radius * Math.sin(pitch);
-    const x = face.ax + lx * Math.cos(lean) - ly * Math.sin(lean) + fit.dx;
-    const y = face.ay + lx * Math.sin(lean) + ly * Math.cos(lean) + fit.dy;
-    const turn = lean + fit.dAngle * DEG;
+    const x = (face.ax + lx * Math.cos(lean) - ly * Math.sin(lean) + fit.dx * portrait) * size;
+    const y = (face.ay + lx * Math.sin(lean) + ly * Math.cos(lean) + fit.dy * portrait) * size;
+    const turn = lean + fit.dAngle * portrait * DEG;
     const [cos, sin] = [Math.cos(turn), Math.sin(turn)];
-    const pill = face.height * fit.hScale;
-    const width = mix(face.width * fit.wScale, pill * 0.6, round) * size;
+    const pill = face.height * mix(1, fit.hScale, portrait);
+    const width = mix(face.width * mix(1, fit.wScale, portrait), pill * 0.6, round) * size;
     const height = mix(pill, pill * 0.6, round) * size * lid;
+    // Along its length the eye bows out toward the rim as it turns away.
+    const bow = -curve * Math.sin(yaw) * Math.cos(pitch);
+    const points = capsule(width, height).map(([u, v]): [number, number] => {
+      // In the face's frame: across the latitude (sheared by a raised gaze), then along it.
+      const side = u * across + v * shear + bow * (1 - Math.cos(v / curve));
+      const up = v * along;
+      return [x + cos * side - sin * up, y + sin * side + cos * up];
+    });
     return {
-      x: fixed(-width / 2),
-      y: fixed(-height / 2),
-      width: fixed(width),
-      height: fixed(height),
-      rx: fixed(Math.min(width, height) / 2),
-      // The eye's own axes on the ball (across the latitude, along the meridian), then the lean.
-      transform: `matrix(${fixed(cos * across)} ${fixed(sin * across)} ${fixed(cos * shear - sin * along)} ${fixed(sin * shear + cos * along)} ${fixed(x * size)} ${fixed(y * size)})`,
+      d: smoothClosedPath(points),
       opacity: Math.cos(yaw) * Math.cos(pitch) > 0.05 ? 1 : 0,
     };
   };
@@ -276,5 +317,5 @@ export function organicFaceEyes(family: number, pose: OrganicFacePose): [Organic
 
 /** The face every static portrait of this body wears, eyes open. */
 export function organicRestEyes(family: number): [OrganicEye, OrganicEye] {
-  return organicFaceEyes(family, { ...organicRestPose(family), lid: 1, round: 0 });
+  return organicFaceEyes(family, { ...organicRestPose(family), lid: 1, round: 0, portrait: 1 });
 }

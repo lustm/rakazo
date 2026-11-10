@@ -232,15 +232,10 @@ function OrganicAvatar({
         >
           <g data-organic-face="" transform={rest.face}>
             {rest.eyes.map((eye, index) => (
-              <rect
+              <path
                 key={index === 0 ? "left" : "right"}
                 data-organic-eye=""
-                x={eye.x}
-                y={eye.y}
-                width={eye.width}
-                height={eye.height}
-                rx={eye.rx}
-                transform={eye.transform}
+                d={eye.d}
                 opacity={eye.opacity}
               />
             ))}

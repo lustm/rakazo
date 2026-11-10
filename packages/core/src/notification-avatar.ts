@@ -48,10 +48,7 @@ export function notificationAvatarSource(bot: {
     const pick = parsed?.kind === "shape" ? parsed.shapeIndex : avatarIdentitySeed(bot.id);
     const family = pick % ORGANIC_AVATAR_FAMILY_COUNT;
     const eyes = organicRestEyes(family)
-      .map(
-        ({ x, y, width, height, rx, transform }) =>
-          `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${rx}" transform="${transform}"/>`,
-      )
+      .map(({ d }) => `<path d="${d}"/>`)
       .join("");
     viewBox = ORGANIC_AVATAR_VIEWBOX;
     body = `<path d="${botBodyShapePath(family, ORGANIC_AVATAR_BODY_SIZE)}" fill="${color}"/><g fill="${botEyeInk(color, lightTokens)}">${eyes}</g>`;

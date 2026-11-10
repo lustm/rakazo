@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BOT_AVATAR_COLORS } from "./bot-avatar-colors.js";
+import { SEEDED_BOT_AVATAR_COLORS } from "./bot-avatar-colors.js";
 import { seededLogoAvatarColor } from "./logo-avatar-traits.js";
 
 describe("seeded logo colours", () => {
@@ -13,11 +13,11 @@ describe("seeded logo colours", () => {
     }
   });
 
-  it("only picks colours from the shared palette, and all of them across a fleet", () => {
+  it("only picks seeded palette colours, and all of them across a fleet", () => {
     const colors = new Set(
       Array.from({ length: 1000 }, (_, index) => seededLogoAvatarColor(`bot-${index}`)),
     );
-    expect(colors).toEqual(new Set(BOT_AVATAR_COLORS));
+    expect(colors).toEqual(new Set(SEEDED_BOT_AVATAR_COLORS));
   });
 
   it("preserves a saved colour and leaves seeded motion parameters unchanged", () => {

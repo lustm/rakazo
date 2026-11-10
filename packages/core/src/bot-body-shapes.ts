@@ -158,7 +158,7 @@ export const BOT_BODY_SHAPES: readonly BotBodyShape[] = [
       3,
     ),
   ),
-  fitShape("squircle", roundedPolygon(regular(4, 65), 0.36)),
+  fitShape("squircle", roundedPolygon(regular(4, 45), 0.36)),
   fitShape(
     "sparkle",
     rotate(

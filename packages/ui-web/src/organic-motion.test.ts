@@ -1,4 +1,4 @@
-import { ORGANIC_REST_GAZE, organicRestEyes } from "@rakazo/core";
+import { organicRestEyes, organicRestPose } from "@rakazo/core";
 import { describe, expect, it } from "vitest";
 import {
   BLINK_DURATION,
@@ -28,11 +28,13 @@ const run = (
 };
 
 describe("organic avatar motion", () => {
-  it("rests looking up and right, leaning back, with the portrait's face", () => {
-    const frame = organicFrame(3, restPose());
-    expect(frame.turn).toBe(`rotate(${ORGANIC_REST_GAZE.roll})`);
+  it("rests in its body's own pose, with the portrait's face", () => {
+    const rest = organicRestPose(2);
+    const frame = organicFrame(2, restPose(2));
+    expect(frame.turn).toBe(`rotate(${rest.roll})`);
+    expect(frame.lean).toBe(`rotate(${rest.lean - rest.roll})`);
     expect(frame.body).toBe("scale(1 1)");
-    expect(frame.eyes).toEqual(organicRestEyes(3));
+    expect(frame.eyes).toEqual(organicRestEyes(2));
   });
 
   it("closes fast and opens slower when blinking", () => {
@@ -73,17 +75,17 @@ describe("organic avatar motion", () => {
   });
 
   it("turns to face a hovering pointer and settles back to rest after it leaves", () => {
-    const motion = createOrganicMotion(3, 0);
+    const motion = createOrganicMotion(3, 0, 0);
     const facing = run(motion, 0, 0.5, false, { yaw: 0, pitch: 0 });
     expect(Math.abs(facing.yaw)).toBeLessThan(1);
     expect(Math.abs(facing.roll)).toBeLessThan(1);
     const settled = run(motion, 0.5, 2.5, false);
-    expect(Math.abs(settled.roll - ORGANIC_REST_GAZE.roll)).toBeLessThan(1);
-    expect(Math.abs(settled.yaw - ORGANIC_REST_GAZE.yaw)).toBeLessThan(10);
+    expect(Math.abs(settled.roll - organicRestPose(0).roll)).toBeLessThan(1);
+    expect(Math.abs(settled.yaw - organicRestPose(0).yaw)).toBeLessThan(10);
   });
 
   it("acts busy while working: round eyes, shrinking, spinning and squashing all come up", () => {
-    const motion = createOrganicMotion(11, 0);
+    const motion = createOrganicMotion(11, 0, 0);
     const seen = { round: false, shrink: false, spin: false, squash: false };
     for (let t = 0; t < 60; t += 1 / 30) {
       const pose = stepOrganicMotion(motion, t, true, null);
@@ -96,16 +98,16 @@ describe("organic avatar motion", () => {
   });
 
   it("hides the eyes while a spin turns the face away", () => {
-    const frame = organicFrame(0, { ...restPose(), yaw: 0, spin: 180 });
+    const frame = organicFrame(0, { ...restPose(0), yaw: 0, spin: 180 });
     expect(frame.eyes.map((eye) => eye.opacity)).toEqual([0, 0]);
   });
 
   it("calms back to rest once work ends", () => {
-    const motion = createOrganicMotion(5, 0);
+    const motion = createOrganicMotion(5, 0, 0);
     run(motion, 0, 6, true);
     const pose = run(motion, 6, 9, false);
     expect(pose.scale).toBeCloseTo(1, 2);
     expect(pose.round).toBeCloseTo(0, 2);
-    expect(Math.abs(pose.roll - ORGANIC_REST_GAZE.roll)).toBeLessThan(1);
+    expect(Math.abs(pose.roll - organicRestPose(0).roll)).toBeLessThan(1);
   });
 });

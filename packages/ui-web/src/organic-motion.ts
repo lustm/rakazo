@@ -1,9 +1,9 @@
-import type { OrganicEye } from "@rakazo/core";
-import { ORGANIC_REST_GAZE, organicFaceEyes } from "@rakazo/core";
+import type { OrganicEye, OrganicRestPose } from "@rakazo/core";
+import { organicFaceEyes, organicRestPose } from "@rakazo/core";
 
 /**
- * Organic avatar motion, computed per frame instead of looped keyframes. At rest a bot looks up
- * and to the right, drifting slightly and blinking on an irregular rhythm. Hovering its row turns
+ * Organic avatar motion, computed per frame instead of looped keyframes. At rest a bot holds its
+ * body's resting gaze, drifting slightly and blinking on an irregular rhythm. Hovering its row turns
  * it to face the pointer. While it works it acts busy: glances around, faces you, widens its
  * eyes, shrinks, tilts, spins like a coin and squashes flat, in a seeded random order.
  *
@@ -79,8 +79,10 @@ export function squashAmount(progress: number): number {
 export interface OrganicPose {
   yaw: number;
   pitch: number;
-  /** Degrees the whole avatar leans. */
+  /** Degrees the outline tips. */
   roll: number;
+  /** Degrees the eyes lean on screen. */
+  lean: number;
   lid: number;
   round: number;
   scale: number;
@@ -91,12 +93,13 @@ export interface OrganicPose {
   breath: number;
 }
 
-export function restPose(): OrganicPose {
-  return { ...ORGANIC_REST_GAZE, lid: 1, round: 0, scale: 1, squash: 0, spin: 0, breath: 1 };
+export function restPose(family: number): OrganicPose {
+  return { ...organicRestPose(family), lid: 1, round: 0, scale: 1, squash: 0, spin: 0, breath: 1 };
 }
 
 export interface OrganicFrame {
   turn: string;
+  lean: string;
   body: string;
   face: string;
   eyes: [OrganicEye, OrganicEye];
@@ -110,6 +113,7 @@ export function organicFrame(family: number, pose: OrganicPose): OrganicFrame {
   const turned = Math.max(0.05, Math.abs(Math.cos((pose.spin * Math.PI) / 180)));
   return {
     turn: `rotate(${fixed(pose.roll)})`,
+    lean: `rotate(${fixed(pose.lean - pose.roll)})`,
     body: `scale(${fixed(pose.scale * squashX * turned)} ${fixed(pose.scale * squashY * pose.breath)})`,
     face: `scale(${fixed(pose.scale * squashX)} ${fixed(pose.scale * squashY)})`,
     eyes: organicFaceEyes(family, {
@@ -121,11 +125,12 @@ export function organicFrame(family: number, pose: OrganicPose): OrganicFrame {
   };
 }
 
-type Channel = "yaw" | "pitch" | "roll" | "round" | "scale";
+type Channel = "yaw" | "pitch" | "roll" | "lean" | "round" | "scale";
 type Targets = Record<Channel, number>;
 
 interface Beat {
-  targets: Targets;
+  /** The eyes lean with the outline while busy. */
+  targets: Omit<Targets, "lean">;
   /** Seconds the beat holds before the next one. */
   hold: number;
   spin?: boolean;
@@ -133,7 +138,7 @@ interface Beat {
 }
 
 const range = (random: () => number, from: number, to: number) => from + random() * (to - from);
-const FACING: Targets = { yaw: 0, pitch: 0, roll: 0, round: 0, scale: 1 };
+const FACING: Targets = { yaw: 0, pitch: 0, roll: 0, lean: 0, round: 0, scale: 1 };
 
 /** The busy moves, weighted by how often they come up. */
 const BEATS: readonly { name: string; weight: number; make: (random: () => number) => Beat }[] = [
@@ -207,6 +212,7 @@ function pickBeat(random: () => number, previous: string): { name: string; beat:
 export interface OrganicMotion {
   last: number;
   phase: number;
+  rest: OrganicRestPose;
   pose: Targets;
   random: () => number;
   blinkAt: number;
@@ -219,14 +225,15 @@ export interface OrganicMotion {
   squashAt: number;
 }
 
-export function createOrganicMotion(seed: number, now: number): OrganicMotion {
+export function createOrganicMotion(seed: number, family: number, now: number): OrganicMotion {
   const random = mulberry32(seed ^ 0x5eed);
-  const { yaw, pitch, roll } = ORGANIC_REST_GAZE;
+  const rest = organicRestPose(family);
   return {
     last: now,
     // Bots on one screen should not drift in step.
     phase: (seed % 997) * 0.37,
-    pose: { yaw, pitch, roll, round: 0, scale: 1 },
+    rest,
+    pose: { ...rest, round: 0, scale: 1 },
     random,
     blinkAt: Number.NEGATIVE_INFINITY,
     nextBlink: now + 1.4 + random() * 1.5,
@@ -267,17 +274,17 @@ export function stepOrganicMotion(
   let targets: Targets;
   let tau: number;
   if (aim) {
-    targets = { yaw: aim.yaw, pitch: aim.pitch, roll: 0, round: 0, scale: 1 };
+    targets = { ...FACING, yaw: aim.yaw, pitch: aim.pitch };
     tau = FOLLOW_TAU;
   } else if (motion.beat) {
-    targets = motion.beat.targets;
+    targets = { ...motion.beat.targets, lean: motion.beat.targets.roll };
     tau = BEAT_TAU;
   } else {
     const drift = gazeDrift(now + motion.phase);
     targets = {
-      yaw: ORGANIC_REST_GAZE.yaw + drift.yaw,
-      pitch: ORGANIC_REST_GAZE.pitch + drift.pitch,
-      roll: ORGANIC_REST_GAZE.roll,
+      ...motion.rest,
+      yaw: motion.rest.yaw + drift.yaw,
+      pitch: motion.rest.pitch + drift.pitch,
       round: 0,
       scale: 1,
     };

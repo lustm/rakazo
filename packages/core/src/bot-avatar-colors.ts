@@ -71,9 +71,17 @@ export const BOT_COLOR_LIST: BotColorDef[] = [
     hex: "#94A3B8",
     previousHex: "#64748B",
   },
+  { id: "black", name: "Pure Black", hex: "#000000" },
 ];
 
-export const BOT_AVATAR_COLORS = BOT_COLOR_LIST.map((c) => c.hex);
+/** Colors a bot without a saved one is drawn in; black is only ever chosen on purpose. */
+const IDENTITY_COLORS = BOT_COLOR_LIST.filter((color) => color.id !== "black");
+
+/** Colors a seed may pick for a bot. */
+export const SEEDED_BOT_AVATAR_COLORS = IDENTITY_COLORS.map((color) => color.hex);
+
+/** The picker's order: black first, then the rest. */
+export const BOT_AVATAR_COLORS = ["#000000", ...SEEDED_BOT_AVATAR_COLORS];
 
 /** Shared identity color for Avatar Studio reset/fallback (Executive Violet). */
 export const DEFAULT_BOT_AVATAR_COLOR = BOT_COLOR_LIST.find((color) => color.id === "violet")!.hex;
@@ -113,8 +121,8 @@ export function resolvePersonaColorDef(
     }
   }
   const seed = (shippedHash(identity) ^ Math.imul(1, 2654435769)) >>> 0;
-  const index = Math.floor(shippedRandom((seed ^ 2654435769) >>> 0)() * BOT_COLOR_LIST.length);
-  return BOT_COLOR_LIST[index % BOT_COLOR_LIST.length] ?? BOT_COLOR_LIST[0]!;
+  const index = Math.floor(shippedRandom((seed ^ 2654435769) >>> 0)() * IDENTITY_COLORS.length);
+  return IDENTITY_COLORS[index % IDENTITY_COLORS.length] ?? IDENTITY_COLORS[0]!;
 }
 
 /** WCAG AA contrast for body text. */

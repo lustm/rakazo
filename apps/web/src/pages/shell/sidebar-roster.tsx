@@ -14,7 +14,7 @@ import {
   ContextMenuTrigger,
   GroupAvatar,
 } from "@rakazo/ui-web";
-import { ChevronDown, CircleAlert, Lock, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ChevronDown, CircleAlert, Lock, MoreHorizontal, Pencil, Star, Trash2 } from "lucide-react";
 import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
 import { Suspense } from "react";
 import { IconTooltip } from "../../components/IconTooltip";
@@ -93,10 +93,21 @@ export function SidebarRoster({
 }) {
   useRedrawAtMidnight();
   const { t } = useLingui();
+  const hasHero = !mini && sidebarGroups.some((group) => group.key === "pinned");
+  const openSpaceMenu = (anchor: HTMLElement, spaceId: string) => {
+    const rect = anchor.getBoundingClientRect();
+    spaceMenuAnchor.current = anchor;
+    setSpaceMenu({ id: spaceId, position: { x: rect.left, y: rect.bottom } });
+  };
   return (
     <>
       {sidebarGroups.map((group, groupIndex) => {
-        const collapsed = Boolean(group.title) && collapsedSidebarSections.has(group.key);
+        // Pinned bots lead the sidebar as large tiles instead of a titled list.
+        const hero = !mini && group.key === "pinned";
+        // With the pinned tiles above and no sections of its own, the rest needs no heading.
+        const title =
+          hasHero && group.key === "unassigned" && botSections.length === 0 ? null : group.title;
+        const collapsed = Boolean(title) && !hero && collapsedSidebarSections.has(group.key);
         const groupBotIds = group.bots.flatMap((item) =>
           item.kind === "bot" ? [item.chat.id] : [],
         );
@@ -122,17 +133,17 @@ export function SidebarRoster({
               if (!mini) toggleSidebarSection(group.key);
             }}
             data-sidebar-group={group.key}
-            className={`flex flex-col gap-0.5 ${mini && groupIndex > 0 ? "mt-2 border-t border-sidebar-border pt-2" : ""}`}
+            className={`flex flex-col gap-0.5 ${hero ? "group/hero relative" : ""} ${mini && groupIndex > 0 ? "mt-2 border-t border-sidebar-border pt-2" : ""}`}
           >
-            {!mini && (group.title || hasSpaceActions) ? (
+            {!mini && !hero && (title || hasSpaceActions) ? (
               // biome-ignore lint/a11y/useSemanticElements: groups sidebar controls, not form fields; Move to remains the keyboard alternative.
               <div
                 role="group"
                 data-roster-drop={rosterDropKey === headerDropKey ? "true" : undefined}
                 className={`${
-                  group.title && hasSpaceActions
+                  title && hasSpaceActions
                     ? "grid pt-3 pb-0.5"
-                    : `flex items-center pt-3 pb-0.5${group.title ? "" : " justify-end"}`
+                    : `flex items-center pt-3 pb-0.5${title ? "" : " justify-end"}`
                 } rounded-lg ${rosterDropKey === headerDropKey ? "bg-sidebar-accent" : ""}`}
                 onDragOver={(event) => {
                   if (!headerDropTarget || !rosterDropAction(headerDropTarget, false)) return;
@@ -149,7 +160,7 @@ export function SidebarRoster({
                   applyRosterDrop(headerDropTarget, false, groupBotIds);
                 }}
               >
-                {group.title ? (
+                {title ? (
                   // Prefer the section menu over the space menu when both apply;
                   // the dedicated space-actions button still opens the space menu.
                   <ContextMenu disabled={!section}>
@@ -191,7 +202,7 @@ export function SidebarRoster({
                         {group.showLock ? (
                           <Lock size={11} strokeWidth={2} aria-hidden="true" />
                         ) : null}
-                        <span className="truncate">{group.title}</span>
+                        <span className="truncate">{title}</span>
                         {group.subtitle ? (
                           <span className="ms-0.5 truncate text-muted-foreground">
                             {group.subtitle}
@@ -240,26 +251,34 @@ export function SidebarRoster({
                     variant="ghost"
                     size="icon-sm"
                     className={
-                      group.title
+                      title
                         ? `col-start-1 row-start-1 justify-self-end self-center ${group.emptySpaceId ? "" : "me-6"}`
                         : undefined
                     }
                     aria-label={t`Actions for ${group.spaceName}`}
-                    onClick={(event) => {
-                      const rect = event.currentTarget.getBoundingClientRect();
-                      spaceMenuAnchor.current = event.currentTarget;
-                      setSpaceMenu({
-                        id: group.spaceId,
-                        position: { x: rect.left, y: rect.bottom },
-                      });
-                    }}
+                    onClick={(event) => openSpaceMenu(event.currentTarget, group.spaceId)}
                   >
                     <MoreHorizontal size={14} aria-hidden="true" />
                   </Button>
                 ) : null}
               </div>
             ) : null}
-            <CollapsibleContent className="flex flex-col gap-0.5">
+            {hero && hasSpaceActions ? (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="absolute end-0 top-0 z-10 opacity-0 group-hover/hero:opacity-100 focus-visible:opacity-100"
+                aria-label={t`Actions for ${group.spaceName}`}
+                onClick={(event) => openSpaceMenu(event.currentTarget, group.spaceId)}
+              >
+                <MoreHorizontal size={14} aria-hidden="true" />
+              </Button>
+            ) : null}
+            <CollapsibleContent
+              className={
+                hero ? "flex flex-wrap justify-center gap-2 pt-2 pb-3" : "flex flex-col gap-0.5"
+              }
+            >
               {group.bots.map((item) => {
                 const selected =
                   (item.kind === "bot" && !inGroup && active?.id === item.chat.id) ||
@@ -299,13 +318,14 @@ export function SidebarRoster({
                 const rowSameList =
                   Boolean(draggedBotId) && groupBotIds.includes(draggedBotId ?? "");
                 const rowDropKey = `row:${item.kind}:${item.chat.id}`;
+                const avatarSize = hero ? 76 : mini ? 40 : compact ? 28 : 46;
                 const avatar =
                   item.kind === "bot" ? (
                     <BotAvatar
                       avatarSet={item.chat.avatarSet}
                       color={item.chat.color}
                       identity={item.chat.id}
-                      size={mini ? 40 : compact ? 28 : 38}
+                      size={avatarSize}
                       status={item.chat.status}
                     />
                   ) : (
@@ -315,7 +335,7 @@ export function SidebarRoster({
                           ? (activeSnapshot.members ?? item.chat.members)
                           : item.chat.members
                       }
-                      size={mini ? 40 : compact ? 28 : 38}
+                      size={avatarSize}
                     />
                   );
                 const chatTrigger = (
@@ -390,11 +410,13 @@ export function SidebarRoster({
                     // Focus the row so closing the menu returns focus here.
                     onContextMenu={(event) => event.currentTarget.focus()}
                     className={`flex items-center ${
-                      mini
-                        ? "mx-auto size-12 justify-center rounded-xl"
-                        : compact
-                          ? "w-full min-h-11 gap-2 rounded-xl px-2.5 py-1.5"
-                          : "w-full gap-3 rounded-xl px-2.5 py-[10px]"
+                      hero
+                        ? "relative w-[112px] flex-col gap-1.5 rounded-2xl px-2 pt-3 pb-2"
+                        : mini
+                          ? "mx-auto size-12 justify-center rounded-xl"
+                          : compact
+                            ? "w-full min-h-11 gap-2 rounded-xl px-2.5 py-1.5"
+                            : "w-full gap-3 rounded-xl px-2.5 py-[10px]"
                     } text-start ${
                       item.kind === "bot" ? "cursor-grab active:cursor-grabbing" : ""
                     } ${
@@ -403,7 +425,40 @@ export function SidebarRoster({
                         : "group-hover/row:bg-accent"
                     }`}
                   >
-                    {mini ? (
+                    {hero ? (
+                      <>
+                        <span className="relative shrink-0">
+                          {avatar}
+                          <span
+                            aria-hidden="true"
+                            className="absolute end-0 bottom-0 flex size-6 items-center justify-center rounded-full bg-warning text-white ring-2 ring-sidebar"
+                          >
+                            <Star size={12} fill="currentColor" strokeWidth={0} />
+                          </span>
+                        </span>
+                        <span
+                          dir="auto"
+                          data-roster-bot-name={item.kind === "bot" ? "" : undefined}
+                          className={`max-w-full truncate text-body2 text-foreground ${
+                            item.chat.unread ? "font-semibold" : "font-medium"
+                          }`}
+                        >
+                          {item.chat.name}
+                        </span>
+                        {item.chat.unread ? (
+                          <>
+                            <span
+                              aria-hidden="true"
+                              data-roster-unread-dot
+                              className="absolute end-2 top-2 size-2 rounded-full bg-unread"
+                            />
+                            <span className="sr-only">
+                              <Trans> (unread)</Trans>
+                            </span>
+                          </>
+                        ) : null}
+                      </>
+                    ) : mini ? (
                       <span className="relative shrink-0">
                         {avatar}
                         {rowError ? (
@@ -439,7 +494,7 @@ export function SidebarRoster({
                     ) : (
                       avatar
                     )}
-                    {!mini ? (
+                    {!mini && !hero ? (
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-1.5">
                           <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">

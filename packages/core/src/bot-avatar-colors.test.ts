@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  BOT_AVATAR_COLORS,
   BOT_COLOR_LIST,
   botEyeInk,
   botEyeTone,
   chatUserBubbleColors,
   contrastRatio,
+  resolvePersonaColorDef,
 } from "./bot-avatar-colors.js";
 
 describe("botEyeTone", () => {
@@ -64,4 +66,14 @@ it("cuts bot eyes in the page color unless the body is nearly white", () => {
   expect(botEyeInk("#FF5EB1", dark)).toBe("#121212");
   expect(botEyeInk("#FF5EB1", light)).toBe("#FFFFFF");
   expect(botEyeInk("#FFFFFF", light)).toBe("#1C1C1C");
+});
+
+describe("pure black", () => {
+  it("leads the picker but is never a seeded fallback", () => {
+    expect(BOT_AVATAR_COLORS[0]).toBe("#000000");
+    for (let index = 0; index < 500; index++)
+      expect(resolvePersonaColorDef(`bot-${index}`).hex).not.toBe("#000000");
+    expect(resolvePersonaColorDef("bot", "#000000").id).toBe("black");
+    expect(botEyeTone("#000000")).toBe("light");
+  });
 });

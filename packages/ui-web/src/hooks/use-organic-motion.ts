@@ -47,6 +47,7 @@ export function applyOrganicFrame(svg: SVGSVGElement, next: OrganicFrame) {
   svg.querySelector("[data-organic-turn]")?.setAttribute("transform", next.turn);
   for (const body of svg.querySelectorAll("[data-organic-body]"))
     body.setAttribute("transform", next.body);
+  svg.querySelector("[data-organic-lean]")?.setAttribute("transform", next.lean);
   svg.querySelector("[data-organic-face]")?.setAttribute("transform", next.face);
   svg.querySelectorAll<SVGRectElement>("[data-organic-eye]").forEach((element, index) => {
     const eye = next.eyes[index];
@@ -90,7 +91,7 @@ export function useOrganicMotion(
     region.addEventListener("pointermove", onMove, { passive: true });
     region.addEventListener("pointerleave", onLeave);
 
-    const motion = createOrganicMotion(seed, performance.now() / 1000);
+    const motion = createOrganicMotion(seed, family, performance.now() / 1000);
     let aim: { yaw: number; pitch: number } | null = null;
     const unsubscribe = subscribeFrames({
       read() {
@@ -114,7 +115,7 @@ export function useOrganicMotion(
       unsubscribe();
       region.removeEventListener("pointermove", onMove);
       region.removeEventListener("pointerleave", onLeave);
-      applyOrganicFrame(svg, organicFrame(family, restPose()));
+      applyOrganicFrame(svg, organicFrame(family, restPose(family)));
     };
   }, [ref, family, seed, enabled]);
 }

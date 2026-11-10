@@ -195,7 +195,7 @@ function OrganicAvatar({
   useOrganicMotion(ref, family, seed, isWorking, canMove && visible && !reducedMotion);
   const shape = botBodyShapePath(family, ORGANIC_AVATAR_BODY_SIZE);
   // The resting pose; useOrganicMotion takes over these attributes while the avatar moves.
-  const rest = organicFrame(family, restPose());
+  const rest = organicFrame(family, restPose(family));
 
   return (
     <svg
@@ -230,20 +230,22 @@ function OrganicAvatar({
           clipPath={`url(#${id}-body)`}
           className={cn("rakazo-organic-avatar-eyes", eyeFill(color))}
         >
-          <g data-organic-face="" transform={rest.face}>
-            {rest.eyes.map((eye, index) => (
-              <rect
-                key={index === 0 ? "left" : "right"}
-                data-organic-eye=""
-                x={eye.x}
-                y={eye.y}
-                width={eye.width}
-                height={eye.height}
-                rx={eye.rx}
-                transform={eye.transform}
-                opacity={eye.opacity}
-              />
-            ))}
+          <g data-organic-lean="" transform={rest.lean}>
+            <g data-organic-face="" transform={rest.face}>
+              {rest.eyes.map((eye, index) => (
+                <rect
+                  key={index === 0 ? "left" : "right"}
+                  data-organic-eye=""
+                  x={eye.x}
+                  y={eye.y}
+                  width={eye.width}
+                  height={eye.height}
+                  rx={eye.rx}
+                  transform={eye.transform}
+                  opacity={eye.opacity}
+                />
+              ))}
+            </g>
           </g>
         </g>
       </g>

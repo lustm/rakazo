@@ -47,7 +47,6 @@ export function applyOrganicFrame(svg: SVGSVGElement, next: OrganicFrame) {
   svg.querySelector("[data-organic-turn]")?.setAttribute("transform", next.turn);
   for (const body of svg.querySelectorAll("[data-organic-body]"))
     body.setAttribute("transform", next.body);
-  svg.querySelector("[data-organic-lean]")?.setAttribute("transform", next.lean);
   svg.querySelector("[data-organic-face]")?.setAttribute("transform", next.face);
   svg.querySelectorAll<SVGRectElement>("[data-organic-eye]").forEach((element, index) => {
     const eye = next.eyes[index];

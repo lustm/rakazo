@@ -1,240 +1,325 @@
 /**
  * The bot body outlines every avatar draws: organic bodies pick one from the bot's id, and Avatar
- * Studio offers them all. Each is generated once from a few geometric primitives (rounded polygons,
- * unions of circles, radial profiles), normalized to fit a unit square around the origin, and
- * emitted as one smooth closed path, so web, mobile and notification portraits share geometry.
+ * Studio offers them all. Each outline is a smooth radial profile (a short Fourier series around
+ * a point near its middle), fitted to the square from -1 to 1 and drawn as one closed path, so
+ * web, mobile and notification portraits share geometry. Outlines are stored in their resting
+ * orientation.
  */
 
 type Point = readonly [number, number];
 
 const TAU = Math.PI * 2;
-const DEG = Math.PI / 180;
-const RADIAL_SAMPLES = 96;
+const SAMPLES = 96;
 
-/** Samples a star-shaped outline from its radius at each angle (0 is right, angles turn clockwise). */
-function radial(radius: (angle: number) => number, smoothing = 0): Point[] {
-  let radii = Array.from({ length: RADIAL_SAMPLES }, (_, index) =>
-    radius((index / RADIAL_SAMPLES) * TAU),
-  );
-  for (let pass = 0; pass < smoothing; pass++)
-    radii = radii.map(
-      (value, index) =>
-        (radii[(index + RADIAL_SAMPLES - 1) % RADIAL_SAMPLES]! +
-          value * 2 +
-          radii[(index + 1) % RADIAL_SAMPLES]!) /
-        4,
-    );
-  return radii.map((value, index) => {
-    const angle = (index / RADIAL_SAMPLES) * TAU;
-    return [Math.cos(angle) * value, Math.sin(angle) * value];
-  });
+interface RadialOutline {
+  readonly key: string;
+  /** Where the radial profile is centred, relative to the outline's box. */
+  readonly origin: Point;
+  /** Fourier coefficients [real, imaginary] of the radius around `origin`; the first is the mean. */
+  readonly coeffs: readonly (readonly [number, number])[];
 }
 
-/** The outer edge of overlapping circles `[cx, cy, r]`, as seen from the origin. */
-function circles(list: readonly (readonly [number, number, number])[]) {
-  return (angle: number) => {
-    const ux = Math.cos(angle);
-    const uy = Math.sin(angle);
-    let reach = 0;
-    for (const [cx, cy, r] of list) {
-      const along = ux * cx + uy * cy;
-      const discriminant = r * r - (cx * cx + cy * cy) + along * along;
-      if (discriminant >= 0) reach = Math.max(reach, along + Math.sqrt(discriminant));
-    }
-    return reach;
-  };
-}
-
-/** A convex polygon through `vertices` with every corner rounded to `corner`. */
-function roundedPolygon(vertices: readonly Point[], corner: number): Point[] {
-  const points: Point[] = [];
-  const count = vertices.length;
-  const tangents = vertices.map((vertex, index) => {
-    const previous = vertices[(index + count - 1) % count]!;
-    const next = vertices[(index + 1) % count]!;
-    const toPrevious = unit([previous[0] - vertex[0], previous[1] - vertex[1]]);
-    const toNext = unit([next[0] - vertex[0], next[1] - vertex[1]]);
-    const half = Math.acos(toPrevious[0] * toNext[0] + toPrevious[1] * toNext[1]) / 2;
-    const reach = corner / Math.tan(half);
-    const bisector = unit([toPrevious[0] + toNext[0], toPrevious[1] + toNext[1]]);
-    const centre: Point = [
-      vertex[0] + (bisector[0] * corner) / Math.sin(half),
-      vertex[1] + (bisector[1] * corner) / Math.sin(half),
-    ];
-    const start: Point = [vertex[0] + toPrevious[0] * reach, vertex[1] + toPrevious[1] * reach];
-    const end: Point = [vertex[0] + toNext[0] * reach, vertex[1] + toNext[1] * reach];
-    return { centre, start, end };
-  });
-  tangents.forEach(({ centre, start, end }, index) => {
-    const from = Math.atan2(start[1] - centre[1], start[0] - centre[0]);
-    let to = Math.atan2(end[1] - centre[1], end[0] - centre[0]);
-    while (to < from) to += TAU;
-    if (to - from > Math.PI) to -= TAU;
-    for (let step = 0; step <= 8; step++) {
-      const angle = from + ((to - from) * step) / 8;
-      points.push([centre[0] + Math.cos(angle) * corner, centre[1] + Math.sin(angle) * corner]);
-    }
-    const next = tangents[(index + 1) % count]!.start;
-    for (let step = 1; step < 4; step++)
-      points.push([
-        end[0] + ((next[0] - end[0]) * step) / 4,
-        end[1] + ((next[1] - end[1]) * step) / 4,
-      ]);
-  });
-  return points;
-}
-
-function regular(sides: number, rotation: number, stretch: Point = [1, 1]): Point[] {
-  return Array.from({ length: sides }, (_, index) => {
-    const angle = rotation * DEG + (index / sides) * TAU;
-    return [Math.cos(angle) * stretch[0], Math.sin(angle) * stretch[1]];
-  });
-}
-
-function rotate(points: readonly Point[], degrees: number): Point[] {
-  const c = Math.cos(degrees * DEG);
-  const s = Math.sin(degrees * DEG);
-  return points.map(([x, y]) => [x * c - y * s, x * s + y * c]);
-}
-
-function unit([x, y]: Point): Point {
-  const length = Math.hypot(x, y) || 1;
-  return [x / length, y / length];
-}
+/** In the order Avatar Studio lists them; stored `::shape_N` values index this list. */
+const OUTLINES: readonly RadialOutline[] = [
+  { key: "circle", origin: [0, 0], coeffs: [[1, 0]] },
+  {
+    key: "cloud",
+    origin: [-0.0858, 0.0264],
+    coeffs: [
+      [0.9295, 0.0],
+      [0.0078, 0.0116],
+      [0.0334, 0.017],
+      [0.026, -0.0044],
+      [-0.0064, -0.0018],
+      [0.019, -0.0015],
+      [0.0043, -0.0038],
+      [-0.0015, 0.0042],
+      [-0.006, 0.0024],
+      [0.0006, 0.0001],
+      [-0.0015, -0.002],
+      [-0.0001, 0.0022],
+      [0.0004, -0.0011],
+      [0.0014, -0.0015],
+      [0.0004, -0.0012],
+    ],
+  },
+  {
+    key: "squircle",
+    origin: [-0.0089, 0.0028],
+    coeffs: [
+      [0.8822, 0.0],
+      [0.0046, 0.0017],
+      [0.005, -0.0304],
+      [0.0006, 0.0007],
+      [-0.0069, -0.0534],
+      [0.0003, -0.0012],
+      [-0.0051, 0.0016],
+      [0.0003, -0.0001],
+      [-0.0114, 0.0013],
+      [-0.0004, -0.0],
+      [0.001, 0.0001],
+      [0.0, -0.0002],
+      [-0.0005, 0.0029],
+      [0.0, 0.0001],
+      [-0.0008, -0.0002],
+    ],
+  },
+  {
+    key: "sparkle",
+    origin: [-0.0093, 0.01],
+    coeffs: [
+      [0.8263, 0.0],
+      [0.0047, 0.0052],
+      [-0.0001, -0.0169],
+      [-0.0022, 0.0008],
+      [0.0738, 0.0341],
+      [0.0007, 0.0025],
+      [0.0004, 0.0019],
+      [0.0003, 0.0001],
+      [0.0013, -0.0007],
+      [0.0002, -0.0005],
+      [-0.0015, 0.0006],
+      [-0.0006, -0.0003],
+      [0.0017, 0.0055],
+      [-0.0005, 0.0006],
+      [0.001, 0.0001],
+    ],
+  },
+  {
+    key: "clover",
+    origin: [-0.0069, 0.008],
+    coeffs: [
+      [0.9254, 0.0],
+      [0.0035, 0.0045],
+      [0.0041, -0.0284],
+      [0.0011, 0.0004],
+      [-0.0041, -0.0448],
+      [0.0006, -0.0007],
+      [0.0011, 0.0011],
+      [-0.0001, 0.0006],
+      [0.01, -0.0056],
+      [0.0005, 0.0001],
+      [-0.0025, 0.0006],
+      [-0.0005, -0.0002],
+      [0.0018, 0.0042],
+      [-0.0001, 0.0002],
+      [-0.0009, -0.0002],
+    ],
+  },
+  {
+    key: "heart",
+    origin: [0.0195, -0.0269],
+    coeffs: [
+      [0.9143, 0.0],
+      [0.0103, 0.0024],
+      [0.0324, 0.0084],
+      [-0.039, 0.0269],
+      [-0.0042, 0.0086],
+      [0.0081, 0.0018],
+      [0.001, 0.0037],
+      [-0.0025, 0.001],
+      [-0.0006, -0.0015],
+      [0.0016, 0.0007],
+      [-0.0006, 0.001],
+      [-0.0018, -0.0],
+      [0.0005, -0.0001],
+      [0.0002, 0.0006],
+      [-0.0006, -0.0001],
+    ],
+  },
+  {
+    key: "scallop",
+    origin: [-0.0121, 0.0039],
+    coeffs: [
+      [0.9208, 0.0],
+      [0.0061, 0.0022],
+      [0.0022, -0.0222],
+      [0.0001, -0.0003],
+      [0.0027, 0.0008],
+      [-0.0004, 0.0015],
+      [0.0217, -0.0292],
+      [0.0009, -0.0011],
+      [0.0046, 0.0041],
+      [0.0001, 0.0005],
+      [0.0022, -0.0023],
+      [-0.0002, -0.0007],
+      [0.0017, 0.0067],
+      [0.0003, 0.0004],
+      [-0.0036, 0.0012],
+      [-0.0004, 0.0],
+      [0.0002, -0.0002],
+      [0.0006, -0.0],
+      [-0.0036, -0.0009],
+      [-0.0005, -0.0],
+      [0.0007, -0.0013],
+    ],
+  },
+  {
+    key: "drop",
+    origin: [-0.0528, 0.0547],
+    coeffs: [
+      [0.93, 0.0],
+      [0.0119, 0.0056],
+      [-0.0194, -0.0234],
+      [0.0228, -0.0066],
+      [-0.0027, 0.0172],
+      [-0.0097, -0.0065],
+      [0.0059, -0.004],
+      [0.0006, 0.004],
+      [-0.0023, -0.0008],
+      [0.0011, -0.0009],
+      [0.0004, 0.0011],
+      [-0.0008, -0.0],
+      [0.0003, -0.0004],
+      [0.0001, 0.0003],
+      [0.0001, -0.0001],
+    ],
+  },
+  {
+    key: "pill",
+    origin: [-0.0201, 0.0204],
+    coeffs: [
+      [0.8662, 0.0],
+      [0.0076, 0.0108],
+      [0.0681, 0.0409],
+      [0.0014, 0.0028],
+      [-0.0034, -0.0062],
+      [0.0001, -0.0008],
+      [-0.0005, 0.0005],
+      [-0.0002, -0.0],
+      [-0.0003, 0.0006],
+      [-0.0001, 0.0001],
+      [0.0004, -0.0001],
+      [0.0001, 0.0001],
+      [0.0001, -0.0001],
+      [-0.0, 0.0],
+      [0.0001, 0.0],
+    ],
+  },
+  {
+    key: "triangle",
+    origin: [-0.1589, 0.0671],
+    coeffs: [
+      [0.9243, 0.0],
+      [0.0062, 0.0083],
+      [-0.0005, 0.0032],
+      [0.0779, -0.0169],
+      [-0.0009, 0.0117],
+      [0.0027, 0.0037],
+      [0.0126, -0.0056],
+      [0.0002, 0.0049],
+      [0.0013, 0.0011],
+      [0.0015, -0.0011],
+      [0.0002, 0.0015],
+      [0.0005, 0.0001],
+      [0.0002, -0.0004],
+      [0.0004, 0.0002],
+      [-0.0, 0.0003],
+    ],
+  },
+  {
+    key: "pentagon",
+    origin: [-0.0628, 0.0354],
+    coeffs: [
+      [0.9257, 0.0],
+      [0.0021, 0.0036],
+      [0.0049, -0.0249],
+      [0.0284, -0.0183],
+      [-0.0012, -0.0189],
+      [-0.0223, -0.0072],
+      [0.006, -0.0083],
+      [-0.0022, -0.002],
+      [-0.0057, 0.0007],
+      [-0.0007, 0.0016],
+      [0.0006, -0.0012],
+      [-0.0024, 0.0015],
+      [-0.0008, 0.0001],
+      [0.0003, -0.0003],
+      [-0.001, 0.0006],
+    ],
+  },
+  {
+    key: "burst",
+    origin: [-0.0096, 0.0013],
+    coeffs: [
+      [0.8457, 0.0],
+      [0.005, 0.0014],
+      [0.0052, -0.0398],
+      [0.0003, -0.0005],
+      [-0.0046, -0.0012],
+      [-0.0013, 0.0023],
+      [0.0424, -0.0579],
+      [0.0016, -0.002],
+      [0.0028, 0.0035],
+      [0.0004, 0.0003],
+      [-0.0033, 0.0],
+      [-0.0004, -0.0004],
+      [0.0011, 0.0031],
+      [-0.0003, 0.0005],
+      [0.005, -0.0006],
+      [0.0004, 0.0006],
+      [0.0005, -0.0056],
+      [0.0002, -0.0005],
+      [-0.0003, -0.0001],
+      [0.0001, -0.0005],
+      [-0.0017, 0.003],
+    ],
+  },
+  {
+    key: "hex",
+    origin: [-0.0168, 0.0051],
+    coeffs: [
+      [0.9322, 0.0],
+      [0.0085, 0.0028],
+      [0.0021, -0.0189],
+      [-0.0001, -0.0003],
+      [0.0056, 0.0022],
+      [-0.0002, 0.0013],
+      [0.0126, -0.0178],
+      [0.001, -0.0007],
+      [-0.0008, -0.0007],
+      [-0.0001, 0.0001],
+      [0.001, -0.0014],
+      [0.0003, 0.0002],
+      [-0.0011, -0.0032],
+      [-0.0, -0.0003],
+      [0.0001, -0.0002],
+    ],
+  },
+];
 
 export interface BotBodyShape {
   readonly key: string;
   /** Outline fitted to the square from -1 to 1. */
   readonly points: readonly Point[];
-  /** Where the face sits: the outline's centroid. */
-  readonly centre: Point;
-  /** Half the outline's width and height, for laying the face across it. */
-  readonly extent: Point;
 }
 
-function fitShape(key: string, points: readonly Point[]): BotBodyShape {
+function trace({ origin, coeffs }: RadialOutline): Point[] {
+  return Array.from({ length: SAMPLES }, (_, index) => {
+    const angle = (index / SAMPLES) * TAU;
+    let radius = coeffs[0]![0];
+    for (let k = 1; k < coeffs.length; k++) {
+      const [re, im] = coeffs[k]!;
+      radius += 2 * (re * Math.cos(k * angle) - im * Math.sin(k * angle));
+    }
+    return [origin[0] + Math.cos(angle) * radius, origin[1] + Math.sin(angle) * radius];
+  });
+}
+
+function fitShape(outline: RadialOutline): BotBodyShape {
+  const points = trace(outline);
   const xs = points.map(([x]) => x);
   const ys = points.map(([, y]) => y);
   const midX = (Math.max(...xs) + Math.min(...xs)) / 2;
   const midY = (Math.max(...ys) + Math.min(...ys)) / 2;
   const half = Math.max(Math.max(...xs) - midX, Math.max(...ys) - midY);
-  const fitted = points.map(([x, y]): Point => [(x - midX) / half, (y - midY) / half]);
-  let area = 0;
-  let cx = 0;
-  let cy = 0;
-  fitted.forEach(([x0, y0], index) => {
-    const [x1, y1] = fitted[(index + 1) % fitted.length]!;
-    const cross = x0 * y1 - x1 * y0;
-    area += cross;
-    cx += (x0 + x1) * cross;
-    cy += (y0 + y1) * cross;
-  });
   return {
-    key,
-    points: fitted,
-    centre: [cx / (3 * area), cy / (3 * area)],
-    extent: [
-      (Math.max(...xs) - Math.min(...xs)) / 2 / half,
-      (Math.max(...ys) - Math.min(...ys)) / 2 / half,
-    ],
+    key: outline.key,
+    points: points.map(([x, y]): Point => [(x - midX) / half, (y - midY) / half]),
   };
 }
 
-/** In the order Avatar Studio lists them; stored `::shape_N` values index this list. */
-export const BOT_BODY_SHAPES: readonly BotBodyShape[] = [
-  fitShape(
-    "circle",
-    radial(() => 1),
-  ),
-  fitShape(
-    "cloud",
-    radial(
-      circles([
-        [-0.46, 0.14, 0.5],
-        [0.14, -0.12, 0.66],
-        [0.62, 0.22, 0.44],
-        [-0.04, 0.3, 0.52],
-      ]),
-      3,
-    ),
-  ),
-  fitShape("squircle", roundedPolygon(regular(4, 45), 0.36)),
-  fitShape(
-    "sparkle",
-    rotate(
-      radial((angle) => 0.6 + 0.4 * Math.abs(Math.cos(2 * angle)) ** 1.6, 6),
-      12,
-    ),
-  ),
-  fitShape(
-    "clover",
-    radial(
-      circles([
-        [0, 0, 0.62],
-        [-0.42, -0.4, 0.5],
-        [0.44, -0.36, 0.46],
-        [0.42, 0.42, 0.5],
-        [-0.4, 0.4, 0.46],
-      ]),
-      3,
-    ),
-  ),
-  fitShape(
-    "heart",
-    rotate(
-      radial(
-        circles([
-          [-0.42, -0.2, 0.56],
-          [0.42, -0.2, 0.56],
-          [0, 0.28, 0.5],
-          [0, 0.62, 0.22],
-        ]),
-        3,
-      ),
-      -20,
-    ),
-  ),
-  fitShape(
-    "scallop",
-    radial(
-      circles([
-        [0, 0, 0.82],
-        ...regular(8, 10).map(([x, y]): readonly [number, number, number] => [
-          x * 0.74,
-          y * 0.74,
-          0.28,
-        ]),
-      ]),
-      2,
-    ),
-  ),
-  fitShape(
-    "drop",
-    radial((angle) => 1 + 0.75 * Math.max(0, Math.cos(angle + 125 * DEG)) ** 6, 2),
-  ),
-  fitShape(
-    "pill",
-    rotate(
-      roundedPolygon(
-        [
-          [-1, -0.56],
-          [1, -0.56],
-          [1, 0.56],
-          [-1, 0.56],
-        ],
-        0.55,
-      ),
-      -8,
-    ),
-  ),
-  fitShape("triangle", roundedPolygon(regular(3, 8), 0.26)),
-  fitShape("pentagon", roundedPolygon(regular(5, -108), 0.32)),
-  fitShape(
-    "burst",
-    radial((angle) => 1 + 0.17 * Math.cos(7 * angle + 0.6) + 0.05 * Math.cos(3 * angle), 4),
-  ),
-  fitShape("hex", roundedPolygon(regular(6, -82), 0.26)),
-];
+export const BOT_BODY_SHAPES: readonly BotBodyShape[] = OUTLINES.map(fitShape);
 
 export const BOT_BODY_SHAPE_COUNT = BOT_BODY_SHAPES.length;
 

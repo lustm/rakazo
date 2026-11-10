@@ -1,5 +1,5 @@
 import type { OrganicEye, OrganicRestPose } from "@rakazo/core";
-import { organicFaceEyes, organicRestPose } from "@rakazo/core";
+import { ORGANIC_UPRIGHT_ROLL, organicFaceEyes, organicRestPose } from "@rakazo/core";
 
 /**
  * Organic avatar motion, computed per frame instead of looped keyframes. At rest a bot holds its
@@ -79,9 +79,9 @@ export function squashAmount(progress: number): number {
 export interface OrganicPose {
   yaw: number;
   pitch: number;
-  /** Degrees the outline tips. */
+  /** Degrees the whole avatar turns from its resting tilt. */
   roll: number;
-  /** Degrees the eyes lean on screen. */
+  /** Degrees the face leans on the body. */
   lean: number;
   lid: number;
   round: number;
@@ -99,7 +99,6 @@ export function restPose(family: number): OrganicPose {
 
 export interface OrganicFrame {
   turn: string;
-  lean: string;
   body: string;
   face: string;
   eyes: [OrganicEye, OrganicEye];
@@ -113,12 +112,12 @@ export function organicFrame(family: number, pose: OrganicPose): OrganicFrame {
   const turned = Math.max(0.05, Math.abs(Math.cos((pose.spin * Math.PI) / 180)));
   return {
     turn: `rotate(${fixed(pose.roll)})`,
-    lean: `rotate(${fixed(pose.lean - pose.roll)})`,
     body: `scale(${fixed(pose.scale * squashX * turned)} ${fixed(pose.scale * squashY * pose.breath)})`,
     face: `scale(${fixed(pose.scale * squashX)} ${fixed(pose.scale * squashY)})`,
     eyes: organicFaceEyes(family, {
       yaw: pose.yaw + pose.spin,
       pitch: pose.pitch,
+      lean: pose.lean,
       lid: pose.lid,
       round: pose.round,
     }),
@@ -129,7 +128,7 @@ type Channel = "yaw" | "pitch" | "roll" | "lean" | "round" | "scale";
 type Targets = Record<Channel, number>;
 
 interface Beat {
-  /** The eyes lean with the outline while busy. */
+  /** The face keeps its resting lean on the body while busy. */
   targets: Omit<Targets, "lean">;
   /** Seconds the beat holds before the next one. */
   hold: number;
@@ -138,7 +137,7 @@ interface Beat {
 }
 
 const range = (random: () => number, from: number, to: number) => from + random() * (to - from);
-const FACING: Targets = { yaw: 0, pitch: 0, roll: 0, lean: 0, round: 0, scale: 1 };
+const FACING: Omit<Targets, "lean"> = { yaw: 0, pitch: 0, roll: 0, round: 0, scale: 1 };
 
 /** The busy moves, weighted by how often they come up. */
 const BEATS: readonly { name: string; weight: number; make: (random: () => number) => Beat }[] = [
@@ -274,10 +273,17 @@ export function stepOrganicMotion(
   let targets: Targets;
   let tau: number;
   if (aim) {
-    targets = { ...FACING, yaw: aim.yaw, pitch: aim.pitch };
+    // Facing you, the body stands upright and so do its eyes.
+    targets = {
+      ...FACING,
+      yaw: aim.yaw,
+      pitch: aim.pitch,
+      roll: ORGANIC_UPRIGHT_ROLL,
+      lean: -ORGANIC_UPRIGHT_ROLL,
+    };
     tau = FOLLOW_TAU;
   } else if (motion.beat) {
-    targets = { ...motion.beat.targets, lean: motion.beat.targets.roll };
+    targets = { ...motion.beat.targets, lean: motion.rest.lean };
     tau = BEAT_TAU;
   } else {
     const drift = gazeDrift(now + motion.phase);

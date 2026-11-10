@@ -1,4 +1,4 @@
-import { organicRestEyes, organicRestPose } from "@rakazo/core";
+import { ORGANIC_UPRIGHT_ROLL, organicRestEyes, organicRestPose } from "@rakazo/core";
 import { describe, expect, it } from "vitest";
 import {
   BLINK_DURATION,
@@ -32,7 +32,6 @@ describe("organic avatar motion", () => {
     const rest = organicRestPose(2);
     const frame = organicFrame(2, restPose(2));
     expect(frame.turn).toBe(`rotate(${rest.roll})`);
-    expect(frame.lean).toBe(`rotate(${rest.lean - rest.roll})`);
     expect(frame.body).toBe("scale(1 1)");
     expect(frame.eyes).toEqual(organicRestEyes(2));
   });
@@ -74,11 +73,12 @@ describe("organic avatar motion", () => {
     expect(squashAmount(1)).toBe(0);
   });
 
-  it("turns to face a hovering pointer and settles back to rest after it leaves", () => {
+  it("stands upright to face a hovering pointer and settles back to rest after it leaves", () => {
     const motion = createOrganicMotion(3, 0, 0);
     const facing = run(motion, 0, 0.5, false, { yaw: 0, pitch: 0 });
     expect(Math.abs(facing.yaw)).toBeLessThan(1);
-    expect(Math.abs(facing.roll)).toBeLessThan(1);
+    expect(facing.roll).toBeCloseTo(ORGANIC_UPRIGHT_ROLL, 0);
+    expect(facing.roll + facing.lean).toBeCloseTo(0, 0);
     const settled = run(motion, 0.5, 2.5, false);
     expect(Math.abs(settled.roll - organicRestPose(0).roll)).toBeLessThan(1);
     expect(Math.abs(settled.yaw - organicRestPose(0).yaw)).toBeLessThan(10);

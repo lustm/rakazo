@@ -230,22 +230,20 @@ function OrganicAvatar({
           clipPath={`url(#${id}-body)`}
           className={cn("rakazo-organic-avatar-eyes", eyeFill(color))}
         >
-          <g data-organic-lean="" transform={rest.lean}>
-            <g data-organic-face="" transform={rest.face}>
-              {rest.eyes.map((eye, index) => (
-                <rect
-                  key={index === 0 ? "left" : "right"}
-                  data-organic-eye=""
-                  x={eye.x}
-                  y={eye.y}
-                  width={eye.width}
-                  height={eye.height}
-                  rx={eye.rx}
-                  transform={eye.transform}
-                  opacity={eye.opacity}
-                />
-              ))}
-            </g>
+          <g data-organic-face="" transform={rest.face}>
+            {rest.eyes.map((eye, index) => (
+              <rect
+                key={index === 0 ? "left" : "right"}
+                data-organic-eye=""
+                x={eye.x}
+                y={eye.y}
+                width={eye.width}
+                height={eye.height}
+                rx={eye.rx}
+                transform={eye.transform}
+                opacity={eye.opacity}
+              />
+            ))}
           </g>
         </g>
       </g>

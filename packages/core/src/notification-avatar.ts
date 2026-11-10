@@ -16,7 +16,7 @@ import {
   logoAvatarEyeInk,
 } from "./logo-avatar-art.js";
 import { logoAvatarTraits } from "./logo-avatar-traits.js";
-import { organicRestEyes, organicRestPose } from "./organic-face.js";
+import { organicRestEyes } from "./organic-face.js";
 
 /** A static notification portrait, with the same identity, saved photo and silhouette as chat. */
 export function notificationAvatarSource(bot: {
@@ -54,8 +54,7 @@ export function notificationAvatarSource(bot: {
       )
       .join("");
     viewBox = ORGANIC_AVATAR_VIEWBOX;
-    const rest = organicRestPose(family);
-    body = `<g transform="rotate(${rest.roll})"><path d="${botBodyShapePath(family, ORGANIC_AVATAR_BODY_SIZE)}" fill="${color}"/><g transform="rotate(${rest.lean - rest.roll})" fill="${botEyeInk(color, lightTokens)}">${eyes}</g></g>`;
+    body = `<path d="${botBodyShapePath(family, ORGANIC_AVATAR_BODY_SIZE)}" fill="${color}"/><g fill="${botEyeInk(color, lightTokens)}">${eyes}</g>`;
   }
   return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="${viewBox}">${body}</svg>`)}`;
 }

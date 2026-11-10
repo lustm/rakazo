@@ -1,11 +1,18 @@
 import type { OrganicEye, OrganicRestPose } from "@rakazo/core";
-import { ORGANIC_UPRIGHT_ROLL, organicFaceEyes, organicRestPose } from "@rakazo/core";
+import {
+  ORGANIC_UPRIGHT_ROLL,
+  organicContainedGaze,
+  organicEyesInside,
+  organicFaceEyes,
+  organicRestPose,
+} from "@rakazo/core";
 
 /**
  * Organic avatar motion, computed per frame instead of looped keyframes. At rest a bot holds its
  * body's resting gaze, drifting slightly and blinking on an irregular rhythm. Hovering its row turns
  * it to face the pointer. While it works it acts busy: glances around, faces you, widens its
- * eyes, shrinks, tilts, spins like a coin and squashes flat, in a seeded random order.
+ * eyes, shrinks, tilts, spins like a coin and squashes flat, in a seeded random order. However it
+ * looks, its eyes stay inside its body.
  *
  * Everything here is a pure function of time and input so tests stay deterministic; the hook in
  * hooks/use-organic-motion.ts owns the clock and writes the frames to the DOM.
@@ -110,6 +117,19 @@ export interface OrganicFrame {
 
 const fixed = (value: number) => Math.round(value * 1000) / 1000;
 
+/** The resting portrait's per-eye touch-ups fade as the body turns from rest, as it does to face you. */
+const portraitAt = (roll: number) => 1 - clamp(Math.abs(roll) / ORGANIC_UPRIGHT_ROLL);
+
+/** A gaze that centres the eyes on every body; looks too far for a body stop short of it. */
+const CENTRE_GAZE = { yaw: 0, pitch: FACE_PITCH };
+
+/** The face a set of pose channels draws, eyes open. */
+const faceOf = (pose: Record<"yaw" | "pitch" | "roll" | "lean" | "round", number>) => ({
+  ...pose,
+  lid: 1,
+  portrait: portraitAt(pose.roll),
+});
+
 export function organicFrame(family: number, pose: OrganicPose): OrganicFrame {
   const squashX = 1 + 0.15 * pose.squash;
   const squashY = 1 - 0.8 * pose.squash;
@@ -124,8 +144,7 @@ export function organicFrame(family: number, pose: OrganicPose): OrganicFrame {
       lean: pose.lean,
       lid: pose.lid,
       round: pose.round,
-      // The resting portrait's per-eye touch-ups fade as the body stands up to face you.
-      portrait: 1 - clamp(Math.abs(pose.roll) / ORGANIC_UPRIGHT_ROLL),
+      portrait: portraitAt(pose.roll),
     }),
   };
 }
@@ -134,7 +153,7 @@ type Channel = "yaw" | "pitch" | "roll" | "lean" | "round" | "scale";
 type Targets = Record<Channel, number>;
 
 interface Beat {
-  /** The face keeps its resting lean on the body while busy. */
+  /** Each beat picks its own lean: the body's resting one, or straight against its turn. */
   targets: Omit<Targets, "lean">;
   /** Seconds the beat holds before the next one. */
   hold: number;
@@ -217,7 +236,10 @@ function pickBeat(random: () => number, previous: string): { name: string; beat:
 export interface OrganicMotion {
   last: number;
   phase: number;
+  family: number;
   rest: OrganicRestPose;
+  /** The current beat's targets, with the lean it picked. */
+  beatTargets: Targets | null;
   pose: Targets;
   random: () => number;
   blinkAt: number;
@@ -237,7 +259,9 @@ export function createOrganicMotion(seed: number, family: number, now: number): 
     last: now,
     // Bots on one screen should not drift in step.
     phase: (seed % 997) * 0.37,
+    family,
     rest,
+    beatTargets: null,
     pose: { ...rest, round: 0, scale: 1 },
     random,
     blinkAt: Number.NEGATIVE_INFINITY,
@@ -271,6 +295,17 @@ export function stepOrganicMotion(
     const { name, beat } = pickBeat(motion.random, motion.beatName);
     motion.beatName = name;
     motion.beat = beat;
+    // Half the beats stand the eyes straight against the body's turn; the rest keep its lean.
+    const upright = { ...beat.targets, lean: -beat.targets.roll };
+    const straight =
+      motion.random() < 0.5 &&
+      organicEyesInside(motion.family, faceOf({ ...upright, ...CENTRE_GAZE }));
+    const chosen = straight ? upright : { ...beat.targets, lean: motion.rest.lean };
+    // Aim the beat where its eyes fit, so the guard below rarely has to step in.
+    motion.beatTargets = {
+      ...chosen,
+      ...organicContainedGaze(motion.family, faceOf(chosen), CENTRE_GAZE),
+    };
     motion.nextBeat = now + beat.hold;
     if (beat.spin) motion.spinAt = now;
     if (beat.squash) motion.squashAt = now;
@@ -288,8 +323,8 @@ export function stepOrganicMotion(
       lean: -ORGANIC_UPRIGHT_ROLL,
     };
     tau = FOLLOW_TAU;
-  } else if (motion.beat) {
-    targets = { ...motion.beat.targets, lean: motion.rest.lean };
+  } else if (motion.beat && motion.beatTargets) {
+    targets = motion.beatTargets;
     tau = BEAT_TAU;
   } else {
     const drift = gazeDrift(now + motion.phase);
@@ -305,6 +340,8 @@ export function stepOrganicMotion(
   const follow = 1 - Math.exp(-dt / tau);
   for (const channel of Object.keys(targets) as Channel[])
     motion.pose[channel] += (targets[channel] - motion.pose[channel]) * follow;
+  // A look past the body's edge stops where the eyes would start to leave it.
+  Object.assign(motion.pose, organicContainedGaze(motion.family, faceOf(motion.pose), CENTRE_GAZE));
 
   if (now >= motion.nextBlink) {
     motion.blinkAt = motion.nextBlink;

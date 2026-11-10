@@ -272,8 +272,10 @@ function capsule(width: number, height: number): [number, number][] {
   });
 }
 
-/** Both eyes for a body `family` in a pose, drawn on its ball in the avatar's viewBox. */
-export function organicFaceEyes(family: number, pose: OrganicFacePose): [OrganicEye, OrganicEye] {
+type EyeOutline = { points: [number, number][]; opacity: number };
+
+/** Both eyes' outlines for a body `family` in a pose, on its ball in the avatar's viewBox. */
+function eyeOutlines(family: number, pose: OrganicFacePose): [EyeOutline, EyeOutline] {
   const face = faceFor(family);
   const size = ORGANIC_AVATAR_BODY_SIZE;
   // Eyes bow along a meridian of a ball a little tighter than the face's own: the reference bows a
@@ -286,7 +288,7 @@ export function organicFaceEyes(family: number, pose: OrganicFacePose): [Organic
   const round = clamp01(pose.round);
   const lid = 0.06 + 0.94 * clamp01(pose.lid);
   const portrait = clamp01(pose.portrait);
-  const eye = (index: 0 | 1): OrganicEye => {
+  const eye = (index: 0 | 1): EyeOutline => {
     const fit = face.eyes[index];
     const yaw = (pose.yaw + (index === 0 ? -1 : 1) * EYE_SPLIT) * DEG;
     const across = Math.max(0.08, Math.cos(yaw));
@@ -307,12 +309,95 @@ export function organicFaceEyes(family: number, pose: OrganicFacePose): [Organic
       const up = v * along;
       return [x + cos * side - sin * up, y + sin * side + cos * up];
     });
-    return {
-      d: smoothClosedPath(points),
-      opacity: Math.cos(yaw) * Math.cos(pitch) > 0.05 ? 1 : 0,
-    };
+    return { points, opacity: Math.cos(yaw) * Math.cos(pitch) > 0.05 ? 1 : 0 };
   };
   return [eye(0), eye(1)];
+}
+
+/** Both eyes for a body `family` in a pose, drawn on its ball in the avatar's viewBox. */
+export function organicFaceEyes(family: number, pose: OrganicFacePose): [OrganicEye, OrganicEye] {
+  const [left, right] = eyeOutlines(family, pose);
+  return [
+    { d: smoothClosedPath(left.points), opacity: left.opacity },
+    { d: smoothClosedPath(right.points), opacity: right.opacity },
+  ];
+}
+
+/** Room an eye keeps from the body's edge, in viewBox units. */
+const EYE_MARGIN = 1;
+
+/** A body's outline in viewBox units, and the radius within which every point is clear of it. */
+type BodyBounds = { outline: [number, number][]; clear: number };
+const bodyBounds = new Map<number, BodyBounds>();
+
+function boundsFor(family: number): BodyBounds {
+  const cached = bodyBounds.get(family);
+  if (cached) return cached;
+  const size = ORGANIC_AVATAR_BODY_SIZE;
+  const outline = (BOT_BODY_SHAPES[family] ?? BOT_BODY_SHAPES[0]!).points.map(
+    ([x, y]): [number, number] => [x * size, y * size],
+  );
+  // The centre is inside every body, so the nearest edge from it bounds a disc that is too.
+  const clear = Math.sqrt(edgeDistanceSquared(outline, 0, 0)) - EYE_MARGIN;
+  const bounds = { outline, clear };
+  bodyBounds.set(family, bounds);
+  return bounds;
+}
+
+function edgeDistanceSquared(outline: [number, number][], x: number, y: number): number {
+  let nearest = Number.POSITIVE_INFINITY;
+  for (let index = 0, previous = outline.length - 1; index < outline.length; previous = index++) {
+    const [ax, ay] = outline[previous]!;
+    const [bx, by] = outline[index]!;
+    const [dx, dy] = [bx - ax, by - ay];
+    const t = clamp01(((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1));
+    const [ex, ey] = [x - ax - t * dx, y - ay - t * dy];
+    nearest = Math.min(nearest, ex * ex + ey * ey);
+  }
+  return nearest;
+}
+
+/** Whether `point` lies inside the body and at least the margin from its edge. */
+function clearOfEdge({ outline, clear }: BodyBounds, [x, y]: [number, number]): boolean {
+  if (x * x + y * y <= clear * clear) return true;
+  let inside = false;
+  for (let index = 0, previous = outline.length - 1; index < outline.length; previous = index++) {
+    const [ax, ay] = outline[previous]!;
+    const [bx, by] = outline[index]!;
+    if (ay > y !== by > y && x < ax + ((y - ay) * (bx - ax)) / (by - ay)) inside = !inside;
+  }
+  return inside && edgeDistanceSquared(outline, x, y) >= EYE_MARGIN * EYE_MARGIN;
+}
+
+/** Whether both eyes of a pose sit wholly inside the body, clear of its edge. */
+export function organicEyesInside(family: number, pose: OrganicFacePose): boolean {
+  const bounds = boundsFor(family);
+  return eyeOutlines(family, pose).every(({ points }) =>
+    points.every((point) => clearOfEdge(bounds, point)),
+  );
+}
+
+/**
+ * The gaze closest to `pose`'s, on the way from `from`, that keeps both eyes inside the body:
+ * a look past the body's edge stops where the eyes would start to leave it.
+ */
+export function organicContainedGaze(
+  family: number,
+  pose: OrganicFacePose,
+  from: { yaw: number; pitch: number },
+): { yaw: number; pitch: number } {
+  const at = (t: number) => ({
+    yaw: mix(from.yaw, pose.yaw, t),
+    pitch: mix(from.pitch, pose.pitch, t),
+  });
+  if (organicEyesInside(family, pose)) return at(1);
+  let [inside, outside] = [0, 1];
+  for (let step = 0; step < 8; step++) {
+    const t = (inside + outside) / 2;
+    if (organicEyesInside(family, { ...pose, ...at(t) })) inside = t;
+    else outside = t;
+  }
+  return at(inside);
 }
 
 /** The face every static portrait of this body wears, eyes open. */

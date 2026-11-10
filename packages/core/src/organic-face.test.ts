@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { ORGANIC_AVATAR_BODY_SIZE } from "./avatar-shape.js";
 import { BOT_BODY_SHAPES, botBodyShapePath } from "./bot-body-shapes.js";
-import { organicFaceEyes, organicRestEyes, organicRestPose } from "./organic-face.js";
+import {
+  organicContainedGaze,
+  organicEyesInside,
+  organicFaceEyes,
+  organicRestEyes,
+  organicRestPose,
+} from "./organic-face.js";
 
 /** The points a path passes through (each segment's end point). */
 const points = (d: string) =>
@@ -86,6 +92,18 @@ describe("organic face", () => {
     const poses = BOT_BODY_SHAPES.map((_, shape) => organicRestPose(shape));
     expect(poses.every((pose) => pose.yaw > 20 && pose.pitch > 20 && pose.roll === 0)).toBe(true);
     expect(new Set(poses.map((pose) => pose.lean)).size).toBeGreaterThan(10);
+  });
+
+  it("rests every body's eyes inside it, and stops a look past its edge where they would leave", () => {
+    for (let shape = 0; shape < BOT_BODY_SHAPES.length; shape++) {
+      const rest = organicRestPose(shape);
+      expect(organicEyesInside(shape, { ...rest, lid: 1, round: 0, portrait: 1 })).toBe(true);
+      // Looking hard down and left would carry the eyes off most bodies.
+      const far = { ...rest, yaw: -38, pitch: -22, lid: 1, round: 0, portrait: 0 };
+      const gaze = organicContainedGaze(shape, far, { yaw: 0, pitch: 14 });
+      expect(organicEyesInside(shape, { ...far, ...gaze })).toBe(true);
+      expect(gaze.pitch).toBeLessThan(14);
+    }
   });
 
   it("looks straight ahead with upright, level eyes", () => {

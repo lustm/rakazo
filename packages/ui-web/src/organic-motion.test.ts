@@ -1,4 +1,10 @@
-import { ORGANIC_UPRIGHT_ROLL, organicRestEyes, organicRestPose } from "@rakazo/core";
+import {
+  BOT_BODY_SHAPE_COUNT,
+  ORGANIC_UPRIGHT_ROLL,
+  organicEyesInside,
+  organicRestEyes,
+  organicRestPose,
+} from "@rakazo/core";
 import { describe, expect, it } from "vitest";
 import {
   BLINK_DURATION,
@@ -99,6 +105,38 @@ describe("organic avatar motion", () => {
       seen.squash ||= pose.squash > 0.9;
     }
     expect(seen).toEqual({ round: true, shrink: true, spin: true, squash: true });
+  });
+
+  it("keeps every body's eyes inside it while idle, hovered and working", () => {
+    for (let family = 0; family < BOT_BODY_SHAPE_COUNT; family++) {
+      const motion = createOrganicMotion(family * 7 + 1, family, 0);
+      const outside: string[] = [];
+      const check = (t: number, working: boolean, aim: { yaw: number; pitch: number } | null) => {
+        const pose = stepOrganicMotion(motion, t, working, aim);
+        // A coin-flip spin turns the face away on purpose; every other frame keeps it whole.
+        if (pose.spin !== 0) return;
+        const portrait = 1 - Math.min(1, Math.abs(pose.roll) / ORGANIC_UPRIGHT_ROLL);
+        if (!organicEyesInside(family, { ...pose, lid: 1, portrait }))
+          outside.push(`${working ? "busy" : aim ? "hover" : "idle"} @${t.toFixed(2)}`);
+      };
+      for (let t = 0; t < 12; t += 1 / 30) check(t, false, null);
+      for (let t = 12; t < 14; t += 1 / 30) check(t, false, pointerGaze(-400, 400, 40));
+      for (let t = 14; t < 60; t += 1 / 30) check(t, true, null);
+      expect(outside.slice(0, 3), `family ${family}`).toEqual([]);
+    }
+  });
+
+  it("stands the eyes straight in some busy beats and keeps the body's lean in others", () => {
+    const motion = createOrganicMotion(11, 0, 0);
+    const leans = new Set<string>();
+    for (let t = 0; t < 60; t += 1 / 30) {
+      stepOrganicMotion(motion, t, true, null);
+      const beat = motion.beatTargets!;
+      leans.add(
+        beat.lean === motion.rest.lean ? "rest" : beat.lean === -beat.roll ? "straight" : "?",
+      );
+    }
+    expect([...leans].sort()).toEqual(["rest", "straight"]);
   });
 
   it("hides the eyes while a spin turns the face away", () => {

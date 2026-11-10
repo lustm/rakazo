@@ -42,10 +42,6 @@ test("photo working avatars show a visible ring while idle avatars stay plain", 
   await expect(idle).toHaveAttribute("data-working", "false");
   await expect(idle.locator(".rakazo-bot-avatar-ring")).toHaveCount(0);
   await expect(idle.locator(".rakazo-bot-avatar-picture")).toHaveCSS("animation-name", "none");
-  await expect(page.locator(".avatar-shape-idle .rakazo-bot-avatar-ring")).toHaveCSS(
-    "animation-play-state",
-    "paused",
-  );
   await captureScreenshot(page, testInfo, "avatar-photo-working-and-idle");
 });
 
@@ -80,7 +76,7 @@ test("photo avatar animations stay still when reduced motion is enabled", async 
   expect(second).toEqual(first);
 });
 
-test("organic avatars blink and drift while idle, become dots while working, and stop offscreen or hidden", async ({
+test("organic avatars drift while idle, face a hovering pointer, act busy while working, and stop offscreen or hidden", async ({
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -89,11 +85,9 @@ test("organic avatars blink and drift while idle, become dots while working, and
   await expect(avatar).toBeVisible();
   const pose = () =>
     avatar.evaluate((svg: SVGSVGElement) => ({
+      turn: svg.querySelector("[data-organic-turn]")?.getAttribute("transform"),
       eyes: [...svg.querySelectorAll("[data-organic-eye]")].map((eye) =>
         eye.getAttribute("transform"),
-      ),
-      dots: [...svg.querySelectorAll("[data-organic-dot]")].map((dot) =>
-        Number(dot.getAttribute("r")),
       ),
     }));
   const moves = async () => {
@@ -102,21 +96,20 @@ test("organic avatars blink and drift while idle, become dots while working, and
     return JSON.stringify(await pose()) !== JSON.stringify(before);
   };
 
-  // At rest the face drifts on its own; the body stays whole.
+  // At rest the face drifts on its own, leaning back and looking up and right.
   expect(await moves()).toBe(true);
-  expect((await pose()).dots).toEqual([0, 0, 0]);
+  expect((await pose()).turn).toMatch(/^rotate\(-1[0-9]/);
 
-  // The eyes turn toward the mouse pointer.
+  // Hovering the avatar's centre turns it to face the pointer, upright.
   const box = (await avatar.boundingBox())!;
-  const eyeX = async () => Number(/translate\(([-\d.]+)/.exec((await pose()).eyes[1] ?? "")?.[1]);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.move(box.x - 600, box.y + box.height / 2);
-  await expect.poll(eyeX).toBeLessThan(0);
+  await expect.poll(async () => (await pose()).turn).toMatch(/^rotate\(-?0(\.\d+)?\)$/);
+  await page.mouse.move(box.x + box.width + 200, box.y - 200);
 
-  // Working collapses the body into three dots.
+  // Working keeps it moving.
   await avatar.evaluate((svg) => svg.parentElement!.querySelector("button")!.click());
   await expect(avatar).toHaveAttribute("data-working", "true");
-  await expect.poll(async () => (await pose()).dots.every((r) => r > 0)).toBe(true);
+  expect(await moves()).toBe(true);
 
   await avatar.evaluate((svg) => {
     svg.closest<HTMLElement>(".avatar-example")!.style.marginTop = "2200px";

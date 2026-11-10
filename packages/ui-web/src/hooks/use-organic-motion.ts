@@ -24,69 +24,51 @@ function tick(ms: number) {
   for (const subscriber of subscribers) subscriber.write(ms / 1000);
 }
 
-/** The mouse pointer every moving avatar watches; touch and pen leave the eyes alone. */
-const pointer = { x: 0, y: 0, inside: false };
-const onPointerMove = (event: PointerEvent) => {
-  if (event.pointerType !== "mouse") return;
-  pointer.x = event.clientX;
-  pointer.y = event.clientY;
-  pointer.inside = true;
-};
-const onPointerOut = (event: PointerEvent) => {
-  if (!event.relatedTarget) pointer.inside = false;
-};
-const onBlur = () => {
-  pointer.inside = false;
-};
-
-/** One animation frame loop and one set of pointer listeners serve every moving avatar. */
+/** One animation frame loop serves every moving avatar. */
 function subscribeFrames(subscriber: FrameSubscriber): () => void {
-  if (subscribers.size === 0) {
-    window.addEventListener("pointermove", onPointerMove, { passive: true });
-    document.addEventListener("pointerout", onPointerOut, { passive: true });
-    window.addEventListener("blur", onBlur);
-  }
   subscribers.add(subscriber);
   if (!frame) frame = window.requestAnimationFrame(tick);
   return () => {
     subscribers.delete(subscriber);
-    if (subscribers.size > 0) return;
-    window.removeEventListener("pointermove", onPointerMove);
-    document.removeEventListener("pointerout", onPointerOut);
-    window.removeEventListener("blur", onBlur);
-    if (frame) window.cancelAnimationFrame(frame);
+    if (subscribers.size > 0 || !frame) return;
+    window.cancelAnimationFrame(frame);
     frame = 0;
   };
 }
 
-function applyFrame(svg: SVGSVGElement, next: OrganicFrame) {
-  const body = svg.querySelector<SVGGElement>("[data-organic-body]");
-  body?.setAttribute("transform", next.body);
-  body?.setAttribute("opacity", String(next.bodyOpacity));
-  svg
-    .querySelector<SVGGElement>("[data-organic-eyes]")
-    ?.setAttribute("opacity", String(next.eyesOpacity));
-  svg.querySelectorAll<SVGRectElement>("[data-organic-eye]").forEach((eye, index) => {
-    const transform = next.eyes[index];
-    if (transform) eye.setAttribute("transform", transform);
-  });
-  svg.querySelectorAll<SVGCircleElement>("[data-organic-dot]").forEach((dot, index) => {
-    const pose = next.dots[index];
-    if (!pose) return;
-    dot.setAttribute("cx", String(pose.cx));
-    dot.setAttribute("cy", String(pose.cy));
-    dot.setAttribute("r", String(pose.r));
-    dot.setAttribute("opacity", String(pose.opacity));
+/**
+ * Where an avatar watches the pointer: an explicit `data-avatar-look-region` ancestor (a profile
+ * panel), else the row or control it sits in (a sidebar conversation), else the avatar itself.
+ */
+const LOOK_REGION = "[data-avatar-look-region]";
+const INTERACTIVE_ROW = 'a, button, [role="button"], [role="link"], [role="option"]';
+
+export function applyOrganicFrame(svg: SVGSVGElement, next: OrganicFrame) {
+  svg.querySelector("[data-organic-turn]")?.setAttribute("transform", next.turn);
+  for (const body of svg.querySelectorAll("[data-organic-body]"))
+    body.setAttribute("transform", next.body);
+  svg.querySelector("[data-organic-face]")?.setAttribute("transform", next.face);
+  svg.querySelectorAll<SVGRectElement>("[data-organic-eye]").forEach((element, index) => {
+    const eye = next.eyes[index];
+    if (!eye) return;
+    element.setAttribute("x", String(eye.x));
+    element.setAttribute("y", String(eye.y));
+    element.setAttribute("width", String(eye.width));
+    element.setAttribute("height", String(eye.height));
+    element.setAttribute("rx", String(eye.rx));
+    element.setAttribute("transform", eye.transform);
+    element.setAttribute("opacity", String(eye.opacity));
   });
 }
 
 /**
- * Drives an organic avatar's face and body each frame while `enabled` (on screen, large enough,
- * motion allowed). React renders the resting pose; this writes straight to the SVG so the avatar
- * never re-renders to move. When it stops, the avatar returns to its resting pose.
+ * Drives an organic avatar each frame while `enabled` (on screen, large enough, motion allowed).
+ * React renders the resting pose; this writes straight to the SVG so the avatar never re-renders
+ * to move. When it stops, the avatar returns to its resting pose.
  */
 export function useOrganicMotion(
   ref: RefObject<SVGSVGElement | null>,
+  family: number,
   seed: number,
   working: boolean,
   enabled: boolean,
@@ -96,11 +78,23 @@ export function useOrganicMotion(
   useEffect(() => {
     const svg = ref.current;
     if (!enabled || !svg || typeof window === "undefined") return;
-    const motion = createOrganicMotion(seed, workingRef.current, performance.now() / 1000);
+    const region: Element = svg.closest(LOOK_REGION) ?? svg.closest(INTERACTIVE_ROW) ?? svg;
+    let pointer: { x: number; y: number } | null = null;
+    const onMove = (event: Event) => {
+      const move = event as PointerEvent;
+      if (move.pointerType === "mouse") pointer = { x: move.clientX, y: move.clientY };
+    };
+    const onLeave = () => {
+      pointer = null;
+    };
+    region.addEventListener("pointermove", onMove, { passive: true });
+    region.addEventListener("pointerleave", onLeave);
+
+    const motion = createOrganicMotion(seed, performance.now() / 1000);
     let aim: { yaw: number; pitch: number } | null = null;
     const unsubscribe = subscribeFrames({
       read() {
-        if (!pointer.inside) {
+        if (!pointer) {
           aim = null;
           return;
         }
@@ -108,17 +102,19 @@ export function useOrganicMotion(
         aim = pointerGaze(
           pointer.x - (box.left + box.width / 2),
           pointer.y - (box.top + box.height / 2),
-          window.innerWidth / 2,
-          window.innerHeight / 2,
+          box.width,
         );
       },
       write(seconds) {
-        applyFrame(svg, organicFrame(stepOrganicMotion(motion, seconds, workingRef.current, aim)));
+        const pose = stepOrganicMotion(motion, seconds, workingRef.current, aim);
+        applyOrganicFrame(svg, organicFrame(family, pose));
       },
     });
     return () => {
       unsubscribe();
-      applyFrame(svg, organicFrame(restPose(workingRef.current)));
+      region.removeEventListener("pointermove", onMove);
+      region.removeEventListener("pointerleave", onLeave);
+      applyOrganicFrame(svg, organicFrame(family, restPose()));
     };
-  }, [ref, seed, enabled]);
+  }, [ref, family, seed, enabled]);
 }

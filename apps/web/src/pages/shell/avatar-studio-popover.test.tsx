@@ -88,7 +88,7 @@ describe("selectable bot icon sets", () => {
     await click("Original");
     expect(changed).toHaveBeenLastCalledWith("#10B981", "organic");
     expect(document.querySelector(".rakazo-organic-avatar")).not.toBeNull();
-    expect(button("wedge")).toBeDefined();
+    expect(button("cloud")).toBeDefined();
   });
 
   it("leaves a photo intact until the user explicitly selects another set", async () => {

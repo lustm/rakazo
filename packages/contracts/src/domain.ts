@@ -427,7 +427,7 @@ export const CreateBotInput = z.object({
   /** Ignored: a new bot takes its owner's set. Older apps still send one. */
   avatarSet: BotAvatarSetSchema.optional(),
   /** Organic body family (0-9); the server picks a matching id unless one is reserved. */
-  avatarFamily: z.number().int().min(0).max(9).optional(),
+  avatarFamily: z.number().int().min(0).max(12).optional(),
   computerMode: ComputerModeSchema.default("team"),
   /** Idempotency key within a space (unique with spaceId). */
   spawnKey: z.string().trim().min(1).max(120).optional(),

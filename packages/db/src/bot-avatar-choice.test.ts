@@ -2,6 +2,7 @@ import { BOT_COLORS } from "@rakazo/contracts";
 import {
   ORGANIC_AVATAR_FAMILY_COUNT,
   ORGANIC_AVATAR_HEART_FAMILY,
+  ORGANIC_AVATAR_LOOKS,
   organicAvatarFamily,
   organicAvatarLook,
   seededLogoAvatarColor,
@@ -97,25 +98,12 @@ describe("chooseBotAvatar", () => {
     }
   });
 
-  it("treats the two round families as one look", () => {
-    // Family 8 is the only unused family, but it is the same round look as family 2.
-    const existing = idsForFamilies([0, 1, 2, 3, 4, 5, 6, 7, 9]).map((id) => ({
-      id,
-      color: "#3EC5A8",
-    }));
-    const random = seeded(1);
-    const looks = Array.from({ length: 20 }, () =>
-      organicAvatarLook(organicAvatarFamily(chooseBotAvatar(existing, undefined, { random }).id)),
-    );
-    // Every look is used once, so the new bot is not pushed into a second round body.
-    expect(looks.some((look) => look !== 2)).toBe(true);
-  });
-
   it("breaks a colour tie away from colours already on the same look", () => {
     // The round look is least used; orange and blue are the least-used colours, and orange is
     // already on a round bot.
-    const [round] = idsForFamilies([2]);
-    const others = idsForFamilies([0, 1, 3, 4, 5, 6, 7, 9, 0, 1, 3, 4, 5, 6, 7, 9]);
+    const [round] = idsForFamilies([0]);
+    const twice = ORGANIC_AVATAR_LOOKS.filter((look) => look !== 0);
+    const others = idsForFamilies([...twice, ...twice]);
     const spread = ["#3EC5A8", "#6A6BF5", "#9B5CF6", "#F2622A", "#D9508A"];
     const existing = [
       { id: round!, color: "#F5A03C" },
@@ -124,7 +112,7 @@ describe("chooseBotAvatar", () => {
     ];
     for (let seed = 1; seed <= 20; seed++) {
       const chosen = chooseBotAvatar(existing, undefined, { random: seeded(seed), now: 0 });
-      expect(organicAvatarLook(organicAvatarFamily(chosen.id))).toBe(2);
+      expect(organicAvatarLook(organicAvatarFamily(chosen.id))).toBe(0);
       expect(chosen.color).toBe("#3B82F6");
     }
   });

@@ -35,6 +35,6 @@ describe("collaboration transcript markers", () => {
 
     expect(html).toContain('role="status"');
     expect(html).toContain('data-working="true"');
-    expect(html).toContain("data-organic-dot");
+    expect(html).toContain("data-organic-eye");
   });
 });

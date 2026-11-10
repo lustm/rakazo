@@ -22,29 +22,29 @@ describe("organic avatar geometry", () => {
     expect(path).not.toMatch(/<|>|javascript:|url\(/i);
   });
 
-  it("produces ten distinct smooth shape families", () => {
-    const families = Array.from({ length: 10 }, (_, seed) =>
-      organicAvatarPath(seed, -((seed % 360) * Math.PI) / 180),
+  it("draws one of the shared body shapes per family", () => {
+    const families = Array.from({ length: ORGANIC_AVATAR_FAMILY_COUNT }, (_, seed) =>
+      organicAvatarPath(seed),
     );
-    expect(new Set(families)).toHaveLength(10);
+    expect(new Set(families)).toHaveLength(ORGANIC_AVATAR_FAMILY_COUNT);
     expect(families.every((path) => (path.match(/C/g) ?? []).length >= 12)).toBe(true);
   });
 
   it("names the family an identity is drawn with", () => {
-    // Without its per-identity phase, a body is its family's template.
-    const unphased = (seed: number) => organicAvatarPath(seed, -((seed % 360) * Math.PI) / 180);
     for (const identity of ["research", "health", "cmh2x9k0a0000abcd1234efgh", "Chief"]) {
       const family = organicAvatarFamily(identity);
       expect(family).toBeGreaterThanOrEqual(0);
       expect(family).toBeLessThan(ORGANIC_AVATAR_FAMILY_COUNT);
-      expect(unphased(avatarIdentitySeed(identity))).toBe(unphased(family));
+      expect(organicAvatarPath(avatarIdentitySeed(identity))).toBe(organicAvatarPath(family));
     }
   });
 });
 
 describe("organic avatar looks", () => {
   it("offers every look but the heart once", () => {
-    expect([...ORGANIC_AVATAR_LOOKS].sort()).toEqual([0, 1, 2, 3, 4, 5, 7, 9]);
+    expect([...ORGANIC_AVATAR_LOOKS].sort((a, b) => a - b)).toEqual([
+      0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12,
+    ]);
     expect(ORGANIC_AVATAR_LOOKS).not.toContain(ORGANIC_AVATAR_HEART_FAMILY);
   });
 

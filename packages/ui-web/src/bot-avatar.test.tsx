@@ -12,7 +12,7 @@ import {
 } from "./bot-avatar.js";
 
 describe("BotAvatar", () => {
-  it("renders distinct ring gradient IDs for concurrent working avatars", () => {
+  it("renders distinct body clip IDs for concurrent working avatars", () => {
     const html = renderToString(
       <div>
         <BotAvatar color="#8B5CF6::shape_0" status="running" />
@@ -32,7 +32,7 @@ describe("BotAvatar", () => {
   // Button sizes any SVG without a size class, which beats width/height attributes but not inline styles.
   it("sizes the shape with an inline style so icon sizing in a button cannot shrink it", () => {
     const html = renderToString(<BotAvatar color="#8B5CF6::shape_0" size={26} />);
-    const shape = html.match(/<svg[^>]*transition-transform[^>]*>/)?.[0];
+    const shape = html.match(/<svg[^>]*rakazo-organic-avatar[^>]*>/)?.[0];
     expect(shape).toMatch(/style="[^"]*width:26px;height:26px/);
   });
 
@@ -120,14 +120,6 @@ describe("BotAvatar", () => {
     expect(html).not.toContain("evil.example");
   });
 
-  it("honors reduced-motion for the working mascot pulse class", () => {
-    const html = renderToString(
-      <BotAvatar color="#8B5CF6::shape_0" identity="maya" size={32} status="running" />,
-    );
-    expect(html).toContain("animate-pulse");
-    expect(html).toContain("motion-reduce:animate-none");
-  });
-
   it("restores a plain color that renders the organic body instead of a pinned shape", () => {
     expect(defaultBotAvatarValue(`${DEFAULT_BOT_AVATAR_COLOR}::shape_3`)).toBe(
       DEFAULT_BOT_AVATAR_COLOR,
@@ -148,17 +140,16 @@ describe("BotAvatar", () => {
     const shaped = renderToString(
       <BotAvatar color={`${DEFAULT_BOT_AVATAR_COLOR}::shape_4`} identity="maya" />,
     );
-    expect(restored).toContain("rakazo-organic-avatar");
-    expect(restored).not.toContain("bot-character-eyes");
-    expect(shaped).toContain("bot-character-eyes");
-    expect(shaped).not.toContain("rakazo-organic-avatar");
+    expect(restored).toContain('data-shape-family="');
+    expect(restored).not.toContain('data-shape-family="4"');
+    expect(shaped).toContain('data-shape-family="4"');
   });
 
   it("exposes shape picker name and pressed state", () => {
     const html = renderToString(
       <BotShapePreview shapeIndex={0} color="#8B5CF6" selected onClick={() => undefined} />,
     );
-    expect(html).toContain('aria-label="hex"');
+    expect(html).toContain('aria-label="circle"');
     expect(html).toContain('aria-pressed="true"');
     expect(html).toContain("focus-visible:ring-2");
   });
@@ -171,15 +162,12 @@ describe("BotAvatar", () => {
     expect(html).toContain("rakazo-organic-avatar");
   });
 
-  it("collapses the organic body into the working dots only while working", () => {
-    const dotRadii = (status: string) =>
-      [
-        ...renderToString(<BotAvatar color="#8B5CF6" status={status} />).matchAll(
-          /<circle data-organic-dot=""[^>]* r="([\d.]+)"/g,
-        ),
-      ].map((match) => Number(match[1]));
-    expect(dotRadii("idle")).toEqual([0, 0, 0]);
-    expect(dotRadii("running").every((radius) => radius > 0)).toBe(true);
+  it("draws studio shapes and id-picked bodies with the same animated face", () => {
+    const studio = renderToString(<BotAvatar color="#8B5CF6::shape_7" status="running" />);
+    expect(studio).toContain("rakazo-organic-avatar");
+    expect(studio).toContain('data-shape-family="7"');
+    expect(studio).toContain('data-working="true"');
+    expect(studio.match(/data-organic-eye=""/g)).toHaveLength(2);
   });
 
   it("draws every plain-colour bot with the organic body", () => {
@@ -198,8 +186,7 @@ describe("BotAvatar", () => {
     const html = renderToString(
       <BotAvatar color={`${DEFAULT_BOT_AVATAR_COLOR}::shape_3`} identity="maya" />,
     );
-    expect(html).toContain("bot-character-eyes");
-    expect(html).not.toContain("rakazo-organic-avatar");
+    expect(html).toContain('data-shape-family="3"');
   });
 
   it("fills the organic body with the resolved palette hex when the custom color is invalid", () => {

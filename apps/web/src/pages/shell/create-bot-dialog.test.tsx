@@ -139,17 +139,12 @@ describe("CreateBotDialog", () => {
     expect(family).toBe(ORGANIC_AVATAR_LOOKS[1]);
   });
 
-  it("sends a studio shape without an organic family", async () => {
-    const onCreate = vi.fn(async (_input: CreateBotDialogInput) => undefined);
-    await render(onCreate);
-    await click(button("Color #FF781C"));
-    await click(button("wedge"));
-    await typeName("Scout");
-    await click(button("Create"));
-    expect(onCreate).toHaveBeenCalledWith({
-      name: "Scout",
-      color: "#FF781C::shape_1",
-    });
+  it("offers each body once, without repeating them as studio shapes", async () => {
+    await render(vi.fn(async (_input: CreateBotDialogInput) => undefined));
+    expect(document.querySelectorAll('button[aria-label^="Shape "]')).toHaveLength(
+      ORGANIC_AVATAR_LOOKS.length,
+    );
+    expect(document.querySelector('button[aria-label="cloud"]')).toBeNull();
   });
 
   it("shows the error and stays open when creating fails", async () => {

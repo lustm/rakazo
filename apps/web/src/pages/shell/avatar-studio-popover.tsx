@@ -107,7 +107,7 @@ export function BotLookPicker({
             </div>
           )}
           <div
-            className={`grid place-items-center gap-2 ${organicIdentities ? "grid-cols-4 sm:grid-cols-8 sm:gap-1" : "grid-cols-4"}`}
+            className={`grid place-items-center gap-2 ${organicIdentities ? "grid-cols-4 sm:grid-cols-6 sm:gap-1" : "grid-cols-5"}`}
           >
             {organicIdentities?.map((organicIdentity, index) => (
               <BotShapePreview
@@ -119,15 +119,18 @@ export function BotLookPicker({
                 onClick={() => onChange(currentColor, organicIdentity)}
               />
             ))}
-            {SHIPPED_BOT_AVATAR_SHAPE_KEYS.map((key, shapeIndex) => (
-              <BotShapePreview
-                key={key}
-                shapeIndex={shapeIndex}
-                color={currentColor}
-                selected={!parsed.isImage && parsed.shapeIndex === shapeIndex}
-                onClick={() => onChange(`${currentColor}::shape_${shapeIndex}`)}
-              />
-            ))}
+            {/* A new bot already chooses among the same bodies above. */}
+            {organicIdentities
+              ? null
+              : SHIPPED_BOT_AVATAR_SHAPE_KEYS.map((key, shapeIndex) => (
+                  <BotShapePreview
+                    key={key}
+                    shapeIndex={shapeIndex}
+                    color={currentColor}
+                    selected={!parsed.isImage && parsed.shapeIndex === shapeIndex}
+                    onClick={() => onChange(`${currentColor}::shape_${shapeIndex}`)}
+                  />
+                ))}
           </div>
         </div>
       ) : null}

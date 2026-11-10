@@ -10,7 +10,7 @@ export function resolveBotAvatarSet(value?: string | null): BotAvatarSet {
 }
 
 /** Matches the eight shipped mascot shapes in `@rakazo/core`. */
-export const BOT_AVATAR_SHAPE_COUNT = 8;
+export const BOT_AVATAR_SHAPE_COUNT = 13;
 
 /**
  * 256x256 webp data URLs from Avatar Studio stay well under this. Cap writes so

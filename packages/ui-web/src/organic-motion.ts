@@ -1,47 +1,30 @@
-import { ORGANIC_AVATAR_EYES } from "@rakazo/core";
+import type { OrganicEye } from "@rakazo/core";
+import { ORGANIC_REST_GAZE, organicFaceEyes } from "@rakazo/core";
 
 /**
- * Organic avatar motion, computed per frame instead of looped keyframes. At rest the face lives
- * on gaze drift and irregular blinks while the body stays put; the eyes sit on an imagined ball
- * and turn toward the mouse pointer, sliding across the body and narrowing as they near its edge.
- * While the bot works, the body collapses into three pulsing dots and the eyes close.
+ * Organic avatar motion, computed per frame instead of looped keyframes. At rest a bot looks up
+ * and to the right, drifting slightly and blinking on an irregular rhythm. Hovering its row turns
+ * it to face the pointer. While it works it acts busy: glances around, faces you, widens its
+ * eyes, shrinks, tilts, spins like a coin and squashes flat, in a seeded random order.
  *
  * Everything here is a pure function of time and input so tests stay deterministic; the hook in
  * hooks/use-organic-motion.ts owns the clock and writes the frames to the DOM.
  */
 
 const TAU = Math.PI * 2;
-const DEG = Math.PI / 180;
-
-/** Radius of the ball the eyes ride on, in organic view box units (the box is 120 wide). */
-const GAZE_RADIUS = 42;
-/** Half the angle between the eyes; at rest it puts them at the static face's ±10.5. */
-const EYE_SPLIT = Math.asin(ORGANIC_AVATAR_EYES.rightCx / GAZE_RADIUS) / DEG;
-/** How far the eyes turn when the pointer is half a window or more away. */
-export const MAX_YAW = 44;
-export const MAX_PITCH = 34;
 
 export const BLINK_DURATION = 0.18;
 const DOUBLE_BLINK_CHANCE = 0.18;
 const DOUBLE_BLINK_GAP = 0.24;
-/** Turning toward or away from the pointer. */
-export const TURN_TIME = 1.1;
-/** Collapsing into the working dots and growing back. */
-export const MODE_MORPH = 0.45;
-/** How quickly the aim catches up with a moving pointer once the eyes are turned. */
-const AIM_LAG = 0.08;
-
-const DOT_RADIUS = 13;
-const DOT_GAP = 33;
-/** The body's scale when it has become the middle dot (bodies are about 48 units in radius). */
-const BODY_DOT_SCALE = DOT_RADIUS / 46;
+/** How far the gaze turns toward a pointer an avatar width or more from its centre. */
+export const LOOK_YAW = 38;
+export const LOOK_PITCH = 32;
+const SPIN_DURATION = 0.7;
+const SQUASH_DURATION = 0.45;
 
 const clamp = (value: number, min = 0, max = 1) => Math.min(max, Math.max(min, value));
+const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2);
 const easeOutQuint = (t: number) => 1 - (1 - clamp(t)) ** 5;
-const smoothstep = (from: number, to: number, value: number) => {
-  const t = clamp((value - from) / (to - from));
-  return t * t * (3 - 2 * t);
-};
 
 /** How open the lids are `progress` (0..1) of the way through a blink: a quick close, slower open. */
 export function blinkLid(progress: number): number {
@@ -49,37 +32,25 @@ export function blinkLid(progress: number): number {
   return k < 0.45 ? 1 - k / 0.45 : (k - 0.45) / 0.55;
 }
 
-/** A dot of the working wave swells once every 1.5 s, each dot half a second after the last. */
-export function dotPulse(seconds: number, index: number): number {
-  const p = ((((seconds - index * 0.5) / 1.5) % 1) + 1) % 1;
-  const k = p < 0.5 ? 0.5 - 0.5 * Math.cos(p * TAU) : 0;
-  return clamp(k * 2);
-}
-
-/** Gaze angles toward a pointer `dx`, `dy` px from the avatar, scaled by half the window size. */
-export function pointerGaze(
-  dx: number,
-  dy: number,
-  halfWidth: number,
-  halfHeight: number,
-): { yaw: number; pitch: number } {
+/** Gaze toward a pointer `dx`, `dy` px from the centre of an avatar `width` px wide. */
+export function pointerGaze(dx: number, dy: number, width: number): { yaw: number; pitch: number } {
+  const reach = Math.max(1, width * 1.2);
   return {
-    yaw: clamp(dx / Math.max(1, halfWidth), -1, 1) * MAX_YAW,
-    pitch: -clamp(dy / Math.max(1, halfHeight), -1, 1) * MAX_PITCH,
+    yaw: clamp(dx / reach, -1, 1) * LOOK_YAW,
+    pitch: -clamp(dy / reach, -1, 1) * LOOK_PITCH,
   };
 }
 
-/** Slow, never-repeating-looking wander from a few incommensurate sine periods. */
-function gazeDrift(seconds: number): { yaw: number; pitch: number; roll: number } {
+/** Slow wander from a few incommensurate sine periods. */
+function gazeDrift(seconds: number): { yaw: number; pitch: number } {
   const wave = (period: number, phase: number) => Math.sin((seconds / period) * TAU + phase);
   return {
     yaw: wave(11.3, 0.4) * 5.5 + wave(3.7, 2.1) * 1.6,
     pitch: wave(9.1, 1.3) * 4.2 + wave(4.3, 0.7) * 1.3,
-    roll: wave(13.7, 2.9) * 2.2,
   };
 }
 
-/** Small seeded PRNG so each bot blinks on its own, reproducible rhythm. */
+/** Small seeded PRNG so each bot blinks and fidgets on its own, reproducible rhythm. */
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
@@ -97,120 +68,183 @@ export function nextBlinkDelay(random: () => number, afterDouble: boolean): numb
   return 1.9 + random() * 2.7;
 }
 
-export interface OrganicPose {
-  /** Degrees; positive turns right / up. */
-  yaw: number;
-  pitch: number;
-  roll: number;
-  /** 1 open, 0 shut. */
-  lid: number;
-  /** 0 the resting body, 1 the three working dots. */
-  mode: number;
-  /** Vertical breath scale of the body. */
-  breath: number;
-  /** Clock for the dot wave, in seconds. */
-  seconds: number;
+/** A momentary squash flat and back: fast down, brief hold, softer recovery. */
+export function squashAmount(progress: number): number {
+  if (progress <= 0 || progress >= 1) return 0;
+  if (progress < 0.27) return easeOutQuint(progress / 0.27);
+  if (progress < 0.4) return 1;
+  return 1 - easeOutQuint((progress - 0.4) / 0.6);
 }
 
-export function restPose(working: boolean): OrganicPose {
-  return { yaw: 0, pitch: 0, roll: 0, lid: 1, mode: working ? 1 : 0, breath: 1, seconds: 0 };
+export interface OrganicPose {
+  yaw: number;
+  pitch: number;
+  /** Degrees the whole avatar leans. */
+  roll: number;
+  lid: number;
+  round: number;
+  scale: number;
+  /** 0..1, how flat the body is squashed. */
+  squash: number;
+  /** Degrees of a coin-flip turn. */
+  spin: number;
+  breath: number;
+}
+
+export function restPose(): OrganicPose {
+  return { ...ORGANIC_REST_GAZE, lid: 1, round: 0, scale: 1, squash: 0, spin: 0, breath: 1 };
 }
 
 export interface OrganicFrame {
+  turn: string;
   body: string;
-  bodyOpacity: number;
-  eyes: [string, string];
-  eyesOpacity: number;
-  dots: { cx: number; cy: number; r: number; opacity: number }[];
+  face: string;
+  eyes: [OrganicEye, OrganicEye];
 }
 
-const fixed = (value: number) => Math.round(value * 100) / 100;
+const fixed = (value: number) => Math.round(value * 1000) / 1000;
 
-/** Projects one eye onto the gaze ball: it slides with the gaze and foreshortens near the rim. */
-function eyeTransform(pose: OrganicPose, side: -1 | 1, lidScale: number): string {
-  const yaw = (pose.yaw + side * EYE_SPLIT) * DEG;
-  const pitch = pose.pitch * DEG;
-  const x = GAZE_RADIUS * Math.sin(yaw) * Math.cos(pitch);
-  const y = -GAZE_RADIUS * Math.sin(pitch);
-  const sx = Math.max(0.12, Math.cos(yaw) / Math.cos(EYE_SPLIT * DEG));
-  const sy = Math.max(0.12, Math.cos(pitch)) * lidScale;
-  // The rect is drawn at its static place, so move it to the origin before turning and scaling.
-  const restX = side < 0 ? ORGANIC_AVATAR_EYES.leftCx : ORGANIC_AVATAR_EYES.rightCx;
-  return `translate(${fixed(x)} ${fixed(y)}) rotate(${fixed(pose.roll)}) scale(${fixed(sx)} ${fixed(sy)}) translate(${-restX} ${-ORGANIC_AVATAR_EYES.cy})`;
-}
-
-export function organicFrame(pose: OrganicPose): OrganicFrame {
-  const m = clamp(pose.mode);
-  // Eyes close as the body starts to collapse, and reopen only once it has nearly regrown.
-  const eyeGate = 1 - clamp(m * 2.5);
-  const lidScale = (0.06 + 0.94 * clamp(pose.lid)) * (0.06 + 0.94 * eyeGate);
-  const bodyScale = 1 - (1 - BODY_DOT_SCALE) * m;
+export function organicFrame(family: number, pose: OrganicPose): OrganicFrame {
+  const squashX = 1 + 0.15 * pose.squash;
+  const squashY = 1 - 0.8 * pose.squash;
+  const turned = Math.max(0.05, Math.abs(Math.cos((pose.spin * Math.PI) / 180)));
   return {
-    body: `scale(${fixed(bodyScale)} ${fixed(bodyScale * pose.breath)})`,
-    bodyOpacity: fixed(1 - smoothstep(0.55, 0.95, m)),
-    eyes: [eyeTransform(pose, -1, lidScale), eyeTransform(pose, 1, lidScale)],
-    eyesOpacity: fixed(eyeGate > 0 ? 1 : 0),
-    dots: [0, 1, 2].map((index) => {
-      const pulse = dotPulse(pose.seconds, index);
-      const side = index - 1;
-      const grown = side === 0 ? smoothstep(0.45, 0.9, m) : smoothstep(0.2, 1, m);
-      return {
-        cx: fixed(side * DOT_GAP * easeOutQuint(m)),
-        cy: fixed(-5 * pulse * grown),
-        r: fixed(DOT_RADIUS * (0.78 + 0.22 * pulse) * grown),
-        opacity: fixed(grown),
-      };
+    turn: `rotate(${fixed(pose.roll)})`,
+    body: `scale(${fixed(pose.scale * squashX * turned)} ${fixed(pose.scale * squashY * pose.breath)})`,
+    face: `scale(${fixed(pose.scale * squashX)} ${fixed(pose.scale * squashY)})`,
+    eyes: organicFaceEyes(family, {
+      yaw: pose.yaw + pose.spin,
+      pitch: pose.pitch,
+      lid: pose.lid,
+      round: pose.round,
     }),
   };
+}
+
+type Channel = "yaw" | "pitch" | "roll" | "round" | "scale";
+type Targets = Record<Channel, number>;
+
+interface Beat {
+  targets: Targets;
+  /** Seconds the beat holds before the next one. */
+  hold: number;
+  spin?: boolean;
+  squash?: boolean;
+}
+
+const range = (random: () => number, from: number, to: number) => from + random() * (to - from);
+const FACING: Targets = { yaw: 0, pitch: 0, roll: 0, round: 0, scale: 1 };
+
+/** The busy moves, weighted by how often they come up. */
+const BEATS: readonly { name: string; weight: number; make: (random: () => number) => Beat }[] = [
+  {
+    name: "glance",
+    weight: 3,
+    make: (r) => ({
+      targets: {
+        yaw: range(r, -38, 38),
+        pitch: range(r, -22, 28),
+        roll: range(r, -14, 14),
+        round: 0,
+        scale: 1,
+      },
+      hold: range(r, 0.9, 1.6),
+    }),
+  },
+  { name: "face", weight: 1, make: (r) => ({ targets: FACING, hold: range(r, 1, 1.8) }) },
+  {
+    name: "wide",
+    weight: 2,
+    make: (r) => ({
+      targets: {
+        yaw: range(r, -24, 24),
+        pitch: range(r, -18, 10),
+        roll: range(r, -10, 10),
+        round: 1,
+        scale: 1,
+      },
+      hold: range(r, 1.4, 2.4),
+    }),
+  },
+  {
+    name: "shrink",
+    weight: 1,
+    make: (r) => ({
+      targets: { yaw: range(r, -14, 14), pitch: range(r, -8, 8), roll: 0, round: 1, scale: 0.72 },
+      hold: range(r, 1.6, 2.4),
+    }),
+  },
+  {
+    name: "tilt",
+    weight: 2,
+    make: (r) => {
+      const side = r() < 0.5 ? -1 : 1;
+      return {
+        targets: { yaw: side * 26, pitch: 10, roll: side * range(r, 18, 26), round: 0, scale: 1 },
+        hold: range(r, 0.9, 1.4),
+      };
+    },
+  },
+  { name: "spin", weight: 1, make: () => ({ targets: FACING, hold: 1.2, spin: true }) },
+  { name: "squash", weight: 1, make: () => ({ targets: FACING, hold: 0.9, squash: true }) },
+];
+const BEAT_WEIGHT = BEATS.reduce((sum, beat) => sum + beat.weight, 0);
+
+function pickBeat(random: () => number, previous: string): { name: string; beat: Beat } {
+  for (;;) {
+    let ticket = random() * BEAT_WEIGHT;
+    let choice = BEATS[0]!;
+    for (const beat of BEATS) {
+      choice = beat;
+      ticket -= beat.weight;
+      if (ticket < 0) break;
+    }
+    if (choice.name !== previous) return { name: choice.name, beat: choice.make(random) };
+  }
 }
 
 /** Per-avatar animation state: one per mounted, visible avatar. */
 export interface OrganicMotion {
   last: number;
   phase: number;
-  working: boolean;
-  modeFrom: number;
-  modeTo: number;
-  modeSince: number;
-  looking: boolean;
-  lookFrom: number;
-  lookTo: number;
-  lookSince: number;
-  aimYaw: number;
-  aimPitch: number;
+  pose: Targets;
   random: () => number;
   blinkAt: number;
   nextBlink: number;
   doubled: boolean;
+  beatName: string;
+  beat: Beat | null;
+  nextBeat: number;
+  spinAt: number;
+  squashAt: number;
 }
 
-export function createOrganicMotion(seed: number, working: boolean, now: number): OrganicMotion {
+export function createOrganicMotion(seed: number, now: number): OrganicMotion {
   const random = mulberry32(seed ^ 0x5eed);
+  const { yaw, pitch, roll } = ORGANIC_REST_GAZE;
   return {
     last: now,
     // Bots on one screen should not drift in step.
     phase: (seed % 997) * 0.37,
-    working,
-    modeFrom: working ? 1 : 0,
-    modeTo: working ? 1 : 0,
-    modeSince: now,
-    looking: false,
-    lookFrom: 0,
-    lookTo: 0,
-    lookSince: now,
-    aimYaw: 0,
-    aimPitch: 0,
+    pose: { yaw, pitch, roll, round: 0, scale: 1 },
     random,
     blinkAt: Number.NEGATIVE_INFINITY,
     nextBlink: now + 1.4 + random() * 1.5,
     doubled: false,
+    beatName: "",
+    beat: null,
+    nextBeat: now,
+    spinAt: Number.NEGATIVE_INFINITY,
+    squashAt: Number.NEGATIVE_INFINITY,
   };
 }
 
-const eased = (from: number, to: number, since: number, now: number, duration: number) =>
-  from + (to - from) * easeOutQuint((now - since) / duration);
+/** Seconds for a channel to close most of the gap to its target: snappy toward a pointer. */
+const FOLLOW_TAU = 0.07;
+const BEAT_TAU = 0.12;
+const SETTLE_TAU = 0.22;
 
-/** Advances `motion` to `now` and returns the pose to draw. `aim` is the pointer's gaze, if any. */
+/** Advances `motion` to `now` and returns the pose to draw. `aim` is the hovering pointer's gaze. */
 export function stepOrganicMotion(
   motion: OrganicMotion,
   now: number,
@@ -220,31 +254,38 @@ export function stepOrganicMotion(
   const dt = clamp(now - motion.last, 0, 0.064);
   motion.last = now;
 
-  if (working !== motion.working) {
-    motion.modeFrom = eased(motion.modeFrom, motion.modeTo, motion.modeSince, now, MODE_MORPH);
-    motion.modeTo = working ? 1 : 0;
-    motion.modeSince = now;
-    motion.working = working;
+  if (!working) motion.beat = null;
+  else if (!motion.beat || now >= motion.nextBeat) {
+    const { name, beat } = pickBeat(motion.random, motion.beatName);
+    motion.beatName = name;
+    motion.beat = beat;
+    motion.nextBeat = now + beat.hold;
+    if (beat.spin) motion.spinAt = now;
+    if (beat.squash) motion.squashAt = now;
   }
-  const mode = eased(motion.modeFrom, motion.modeTo, motion.modeSince, now, MODE_MORPH);
 
-  const looking = aim !== null && !working;
-  if (looking !== motion.looking) {
-    motion.lookFrom = eased(motion.lookFrom, motion.lookTo, motion.lookSince, now, TURN_TIME);
-    motion.lookTo = looking ? 1 : 0;
-    motion.lookSince = now;
-    motion.looking = looking;
-    if (looking && aim) {
-      motion.aimYaw = aim.yaw;
-      motion.aimPitch = aim.pitch;
-    }
+  let targets: Targets;
+  let tau: number;
+  if (aim) {
+    targets = { yaw: aim.yaw, pitch: aim.pitch, roll: 0, round: 0, scale: 1 };
+    tau = FOLLOW_TAU;
+  } else if (motion.beat) {
+    targets = motion.beat.targets;
+    tau = BEAT_TAU;
+  } else {
+    const drift = gazeDrift(now + motion.phase);
+    targets = {
+      yaw: ORGANIC_REST_GAZE.yaw + drift.yaw,
+      pitch: ORGANIC_REST_GAZE.pitch + drift.pitch,
+      roll: ORGANIC_REST_GAZE.roll,
+      round: 0,
+      scale: 1,
+    };
+    tau = SETTLE_TAU;
   }
-  if (looking && aim) {
-    const follow = 1 - Math.exp(-dt / AIM_LAG);
-    motion.aimYaw += (aim.yaw - motion.aimYaw) * follow;
-    motion.aimPitch += (aim.pitch - motion.aimPitch) * follow;
-  }
-  const mix = eased(motion.lookFrom, motion.lookTo, motion.lookSince, now, TURN_TIME);
+  const follow = 1 - Math.exp(-dt / tau);
+  for (const channel of Object.keys(targets) as Channel[])
+    motion.pose[channel] += (targets[channel] - motion.pose[channel]) * follow;
 
   if (now >= motion.nextBlink) {
     motion.blinkAt = motion.nextBlink;
@@ -254,15 +295,14 @@ export function stepOrganicMotion(
   }
   const sinceBlink = now - motion.blinkAt;
   const lid = sinceBlink < BLINK_DURATION ? blinkLid(sinceBlink / BLINK_DURATION) : 1;
+  const spinProgress = (now - motion.spinAt) / SPIN_DURATION;
+  const spin = spinProgress > 0 && spinProgress < 1 ? 360 * easeInOutCubic(spinProgress) : 0;
 
-  const drift = gazeDrift(now + motion.phase);
   return {
-    yaw: motion.aimYaw * mix + drift.yaw,
-    pitch: motion.aimPitch * mix + drift.pitch,
-    roll: drift.roll,
+    ...motion.pose,
     lid,
-    mode,
+    squash: squashAmount((now - motion.squashAt) / SQUASH_DURATION),
+    spin,
     breath: 1 + Math.sin((now / 3.4) * TAU) * 0.005,
-    seconds: now,
   };
 }

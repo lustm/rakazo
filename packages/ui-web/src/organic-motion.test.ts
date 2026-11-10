@@ -1,55 +1,38 @@
-import { ORGANIC_AVATAR_EYES } from "@rakazo/core";
+import { ORGANIC_REST_GAZE, organicRestEyes } from "@rakazo/core";
 import { describe, expect, it } from "vitest";
 import {
   BLINK_DURATION,
   blinkLid,
   createOrganicMotion,
-  dotPulse,
-  MAX_PITCH,
-  MAX_YAW,
-  MODE_MORPH,
+  LOOK_PITCH,
+  LOOK_YAW,
   mulberry32,
   nextBlinkDelay,
   organicFrame,
   pointerGaze,
   restPose,
+  squashAmount,
   stepOrganicMotion,
-  TURN_TIME,
 } from "./organic-motion.js";
 
-const translateX = (transform: string) => Number(/translate\(([-\d.]+)/.exec(transform)?.[1]);
-const scale = (transform: string) =>
-  /scale\(([-\d.]+) ([-\d.]+)\)/.exec(transform)?.slice(1).map(Number) ?? [];
+const run = (
+  motion: ReturnType<typeof createOrganicMotion>,
+  from: number,
+  to: number,
+  working: boolean,
+  aim: { yaw: number; pitch: number } | null = null,
+) => {
+  let pose = stepOrganicMotion(motion, from, working, aim);
+  for (let t = from; t <= to; t += 1 / 60) pose = stepOrganicMotion(motion, t, working, aim);
+  return pose;
+};
 
 describe("organic avatar motion", () => {
-  it("rests with the static face: eyes at their usual place and size, no dots", () => {
-    const frame = organicFrame(restPose(false));
-    expect(frame.eyes.map(translateX)).toEqual([
-      ORGANIC_AVATAR_EYES.leftCx,
-      ORGANIC_AVATAR_EYES.rightCx,
-    ]);
-    expect(frame.eyes.map(scale)).toEqual([
-      [1, 1],
-      [1, 1],
-    ]);
-    expect(frame.bodyOpacity).toBe(1);
-    expect(frame.dots.every((dot) => dot.r === 0 && dot.opacity === 0)).toBe(true);
-  });
-
-  it("becomes three dots with its eyes closed while working", () => {
-    const frame = organicFrame(restPose(true));
-    expect(frame.eyesOpacity).toBe(0);
-    expect(frame.bodyOpacity).toBe(0);
-    expect(frame.dots.map((dot) => dot.cx)).toEqual([-33, 0, 33]);
-    expect(frame.dots.every((dot) => dot.r > 0 && dot.opacity === 1)).toBe(true);
-  });
-
-  it("slides the eyes toward the gaze and narrows the one nearer the rim", () => {
-    const frame = organicFrame({ ...restPose(false), yaw: 40 });
-    const [left, right] = frame.eyes;
-    expect(translateX(left!)).toBeGreaterThan(ORGANIC_AVATAR_EYES.leftCx);
-    expect(translateX(right!)).toBeGreaterThan(ORGANIC_AVATAR_EYES.rightCx);
-    expect(scale(right!)[0]).toBeLessThan(scale(left!)[0]!);
+  it("rests looking up and right, leaning back, with the portrait's face", () => {
+    const frame = organicFrame(3, restPose());
+    expect(frame.turn).toBe(`rotate(${ORGANIC_REST_GAZE.roll})`);
+    expect(frame.body).toBe("scale(1 1)");
+    expect(frame.eyes).toEqual(organicRestEyes(3));
   });
 
   it("closes fast and opens slower when blinking", () => {
@@ -60,16 +43,10 @@ describe("organic avatar motion", () => {
     expect(1 - blinkLid(0.1)).toBeGreaterThan(blinkLid(0.55));
   });
 
-  it("waves the working dots in turn", () => {
-    expect(dotPulse(0.375, 0)).toBeCloseTo(1);
-    expect(dotPulse(0.875, 1)).toBeCloseTo(1);
-    expect(dotPulse(1.375, 2)).toBeCloseTo(1);
-    expect(dotPulse(1, 0)).toBe(0);
-  });
-
-  it("aims at the pointer within the turning range", () => {
-    expect(pointerGaze(1000, -1000, 500, 400)).toEqual({ yaw: MAX_YAW, pitch: MAX_PITCH });
-    expect(pointerGaze(-250, 200, 500, 400)).toEqual({ yaw: -MAX_YAW / 2, pitch: -MAX_PITCH / 2 });
+  it("aims at a pointer over the avatar, straight ahead at its centre", () => {
+    expect(pointerGaze(0, 0, 40)).toEqual({ yaw: 0, pitch: -0 });
+    expect(pointerGaze(400, -400, 40)).toEqual({ yaw: LOOK_YAW, pitch: LOOK_PITCH });
+    expect(pointerGaze(-24, 24, 40)).toEqual({ yaw: -LOOK_YAW / 2, pitch: -LOOK_PITCH / 2 });
   });
 
   it("blinks every 1.9 to 4.6 seconds, sometimes twice in quick succession", () => {
@@ -88,30 +65,47 @@ describe("organic avatar motion", () => {
     }
   });
 
-  it("eases into the working dots and back without jumping", () => {
-    const motion = createOrganicMotion(7, false, 0);
-    expect(stepOrganicMotion(motion, 0, false, null).mode).toBe(0);
-    const early = stepOrganicMotion(motion, 0.05, true, null).mode;
-    expect(early).toBe(0);
-    const mid = stepOrganicMotion(motion, 0.05 + MODE_MORPH / 3, true, null).mode;
-    expect(mid).toBeGreaterThan(0.5);
-    expect(mid).toBeLessThan(1);
-    expect(stepOrganicMotion(motion, 0.05 + MODE_MORPH, true, null).mode).toBe(1);
-    const back = stepOrganicMotion(motion, 1, false, null).mode;
-    expect(back).toBe(1);
-    expect(stepOrganicMotion(motion, 1 + MODE_MORPH, false, null).mode).toBe(0);
+  it("squashes flat for a moment and recovers", () => {
+    expect(squashAmount(0)).toBe(0);
+    expect(squashAmount(0.3)).toBe(1);
+    expect(squashAmount(0.7)).toBeGreaterThan(0);
+    expect(squashAmount(1)).toBe(0);
   });
 
-  it("turns toward the pointer gradually and only while idle", () => {
-    const aim = { yaw: MAX_YAW, pitch: 0 };
-    const motion = createOrganicMotion(3, false, 0);
-    stepOrganicMotion(motion, 0, false, aim);
-    const turning = stepOrganicMotion(motion, TURN_TIME / 4, false, aim).yaw;
-    const turned = stepOrganicMotion(motion, TURN_TIME * 2, false, aim).yaw;
-    expect(turning).toBeLessThan(turned);
-    expect(turned).toBeGreaterThan(MAX_YAW - 10);
-    const working = createOrganicMotion(3, true, 0);
-    stepOrganicMotion(working, 0, true, aim);
-    expect(Math.abs(stepOrganicMotion(working, TURN_TIME * 2, true, aim).yaw)).toBeLessThan(10);
+  it("turns to face a hovering pointer and settles back to rest after it leaves", () => {
+    const motion = createOrganicMotion(3, 0);
+    const facing = run(motion, 0, 0.5, false, { yaw: 0, pitch: 0 });
+    expect(Math.abs(facing.yaw)).toBeLessThan(1);
+    expect(Math.abs(facing.roll)).toBeLessThan(1);
+    const settled = run(motion, 0.5, 2.5, false);
+    expect(Math.abs(settled.roll - ORGANIC_REST_GAZE.roll)).toBeLessThan(1);
+    expect(Math.abs(settled.yaw - ORGANIC_REST_GAZE.yaw)).toBeLessThan(10);
+  });
+
+  it("acts busy while working: round eyes, shrinking, spinning and squashing all come up", () => {
+    const motion = createOrganicMotion(11, 0);
+    const seen = { round: false, shrink: false, spin: false, squash: false };
+    for (let t = 0; t < 60; t += 1 / 30) {
+      const pose = stepOrganicMotion(motion, t, true, null);
+      seen.round ||= pose.round > 0.9;
+      seen.shrink ||= pose.scale < 0.8;
+      seen.spin ||= pose.spin > 90;
+      seen.squash ||= pose.squash > 0.9;
+    }
+    expect(seen).toEqual({ round: true, shrink: true, spin: true, squash: true });
+  });
+
+  it("hides the eyes while a spin turns the face away", () => {
+    const frame = organicFrame(0, { ...restPose(), yaw: 0, spin: 180 });
+    expect(frame.eyes.map((eye) => eye.opacity)).toEqual([0, 0]);
+  });
+
+  it("calms back to rest once work ends", () => {
+    const motion = createOrganicMotion(5, 0);
+    run(motion, 0, 6, true);
+    const pose = run(motion, 6, 9, false);
+    expect(pose.scale).toBeCloseTo(1, 2);
+    expect(pose.round).toBeCloseTo(0, 2);
+    expect(Math.abs(pose.roll - ORGANIC_REST_GAZE.roll)).toBeLessThan(1);
   });
 });

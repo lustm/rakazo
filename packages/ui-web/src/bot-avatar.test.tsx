@@ -171,17 +171,15 @@ describe("BotAvatar", () => {
     expect(html).toContain("rakazo-organic-avatar");
   });
 
-  it("morphs the organic body only while working", () => {
-    const morphing = (status: string) =>
+  it("collapses the organic body into the working dots only while working", () => {
+    const dotRadii = (status: string) =>
       [
         ...renderToString(<BotAvatar color="#8B5CF6" status={status} />).matchAll(
-          /rakazo-organic-avatar-body-(idle|working)"[^>]*>(<animate)?/g,
+          /<circle data-organic-dot=""[^>]* r="([\d.]+)"/g,
         ),
-      ]
-        .filter((match) => match[2])
-        .map((match) => match[1]);
-    expect(morphing("idle")).toEqual([]);
-    expect(morphing("running")).toEqual(["working"]);
+      ].map((match) => Number(match[1]));
+    expect(dotRadii("idle")).toEqual([0, 0, 0]);
+    expect(dotRadii("running").every((radius) => radius > 0)).toBe(true);
   });
 
   it("draws every plain-colour bot with the organic body", () => {

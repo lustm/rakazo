@@ -19,14 +19,16 @@ import {
   SHIPPED_BOT_AVATAR_VIEWBOX,
   shippedBotAvatarShapePath,
 } from "@rakazo/core";
-import type { ComponentProps, CSSProperties } from "react";
-import { memo, useEffect, useId, useMemo, useRef, useSyncExternalStore } from "react";
+import type { ComponentProps } from "react";
+import { memo, useId, useMemo, useRef } from "react";
 import { useBotAvatarActivity } from "./bot-avatar-activity.js";
 import type { AvatarLookRange } from "./hooks/use-avatar-look.js";
 import { useAvatarLook } from "./hooks/use-avatar-look.js";
 import { useAvatarMotionVisibility } from "./hooks/use-avatar-motion-visibility.js";
+import { useOrganicMotion } from "./hooks/use-organic-motion.js";
 import { cn } from "./lib/utils.js";
 import { LogoAvatar } from "./logo-avatar.js";
+import { organicFrame, restPose } from "./organic-motion.js";
 import "./styles.css";
 
 export type { BotColorDef };
@@ -43,7 +45,6 @@ export const BOT_MASCOT_SHAPES = SHIPPED_SHAPE_KEYS.map(
 const FALLBACK_SHAPE_PATH = BOT_SHAPES.hex ?? "";
 
 /** How far the eyes travel toward the pointer, in each avatar's viewBox units. */
-const ORGANIC_LOOK_RANGE: AvatarLookRange = { x: 10, y: 7 };
 const SHAPE_LOOK_RANGE: AvatarLookRange = { x: 20, y: 14 };
 
 export function parseBotAvatar(
@@ -274,22 +275,14 @@ function OrganicAvatar({
   isWorking: boolean;
   className?: string;
 }) {
-  const reducedMotion = useSyncExternalStore(
-    subscribeToReducedMotion,
-    reducedMotionSnapshot,
-    () => false,
-  );
-  const { ref, visible } = useAvatarMotionVisibility(!reducedMotion);
-  useEffect(() => {
-    // jsdom has no SMIL clock, so these are optional.
-    if (visible) ref.current?.unpauseAnimations?.();
-    else ref.current?.pauseAnimations?.();
-  }, [ref, visible]);
-  useAvatarLook(ref, ORGANIC_LOOK_RANGE, size >= 20);
+  const id = useId().replace(/[^a-zA-Z0-9-_]/g, "");
+  const canMove = size >= 20;
+  const { ref, visible, reducedMotion } = useAvatarMotionVisibility(canMove);
   const seed = avatarIdentitySeed(identity || color || DEFAULT_BOT_AVATAR_COLOR);
-  const duration = `${4.8 + (seed % 24) / 10}s`;
-  const shapeA = organicAvatarPath(seed);
-  const shapeB = organicAvatarPath(seed, 0.42);
+  useOrganicMotion(ref, seed, isWorking, canMove && visible && !reducedMotion);
+  const shape = organicAvatarPath(seed);
+  // The resting pose; useOrganicMotion takes over these attributes while the avatar moves.
+  const rest = organicFrame(restPose(isWorking));
 
   return (
     <svg
@@ -300,52 +293,49 @@ function OrganicAvatar({
       data-working={isWorking}
       data-paused={!visible}
       data-shape-family={seed % 10}
-      data-eye-pattern={seed % 4}
       style={{
         width: size,
         height: size,
         flex: "none",
       }}
     >
-      {(["idle", "working"] as const).map((mode) => (
+      <defs>
+        <clipPath id={`${id}-body`}>
+          <path d={shape} />
+        </clipPath>
+      </defs>
+      <g data-organic-body="" transform={rest.body} opacity={rest.bodyOpacity}>
         <path
-          key={mode}
-          className={`rakazo-organic-avatar-body rakazo-organic-avatar-body-${mode}`}
-          d={shapeA}
+          className="rakazo-organic-avatar-body"
+          d={shape}
           fill={color}
-          style={
-            {
-              "--rakazo-organic-path": `path("${shapeA}")`,
-              filter:
-                mode === "working"
-                  ? `drop-shadow(0 0 ${Math.round(size * 0.16)}px ${color})`
-                  : "drop-shadow(0 2px 3px rgba(0,0,0,.34))",
-            } as CSSProperties
-          }
+          style={{ filter: "drop-shadow(0 2px 3px rgba(0,0,0,.34))" }}
+        />
+        {/* Eyes ride the body and are cut off at its edge as they turn. */}
+        <g
+          data-organic-eyes=""
+          clipPath={`url(#${id}-body)`}
+          opacity={rest.eyesOpacity}
+          className={cn("rakazo-organic-avatar-eyes", eyeFill(color))}
         >
-          {/* Only a working body morphs. A late <animate> joins the svg clock mid-loop. */}
-          {!reducedMotion && mode === "working" && isWorking ? (
-            <animate
-              attributeName="d"
-              values={`${shapeA};${shapeB};${shapeA}`}
-              dur={duration}
-              repeatCount="indefinite"
-            />
-          ) : null}
-        </path>
-      ))}
-      <g className="rakazo-avatar-look">
-        <g transform={`rotate(${organicAvatarEyeTilt(seed)})`}>
-          {(["idle", "working"] as const).map((mode) => (
-            <g
-              key={mode}
-              className={`rakazo-organic-avatar-eyes rakazo-organic-avatar-eyes-${mode} ${eyeFill(color)}`}
-            >
-              <BarEyes eyes={ORGANIC_AVATAR_EYES} />
-            </g>
-          ))}
+          <g transform={`rotate(${organicAvatarEyeTilt(seed)})`}>
+            {avatarEyeRects(ORGANIC_AVATAR_EYES).map((rect, index) => (
+              <rect key={rect.x} data-organic-eye="" {...rect} transform={rest.eyes[index]} />
+            ))}
+          </g>
         </g>
       </g>
+      {rest.dots.map((dot, index) => (
+        <circle
+          key={index}
+          data-organic-dot=""
+          cx={dot.cx}
+          cy={dot.cy}
+          r={dot.r}
+          opacity={dot.opacity}
+          fill={color}
+        />
+      ))}
     </svg>
   );
 }
@@ -360,18 +350,6 @@ function eyeFill(bodyHex: string): string {
   if (tone === "dark") return "fill-foreground dark:fill-background";
   if (tone === "light") return "fill-background dark:fill-foreground";
   return "fill-background";
-}
-
-const reducedMotionMedia = "(prefers-reduced-motion: reduce)";
-
-function reducedMotionSnapshot(): boolean {
-  return window.matchMedia(reducedMotionMedia).matches;
-}
-
-function subscribeToReducedMotion(onChange: () => void): () => void {
-  const media = window.matchMedia(reducedMotionMedia);
-  media.addEventListener("change", onChange);
-  return () => media.removeEventListener("change", onChange);
 }
 
 export function BotShapePreview({

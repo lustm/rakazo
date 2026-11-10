@@ -53,6 +53,31 @@ describe("run connection selection", () => {
     expect(selectRunConnections(rows, ["slack"])).toEqual([]);
   });
 
+  it("revokes an errored row whose account is dead instead of reviving it for the run", async () => {
+    const dead = {
+      id: "gmail",
+      connectorId: "composio",
+      provider: "gmail",
+      displayName: "Gmail",
+      status: "error",
+      providerRef: "ca_expired",
+    };
+    const prisma = {
+      connection: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    } as unknown as PrismaClient;
+
+    await persistLivePluginConnections(
+      prisma,
+      { userId: "user", spaceId: "space" },
+      [dead],
+      ["gmail"],
+      ["ca_expired"],
+    );
+
+    expect(dead.status).toBe("revoked");
+    expect(selectRunConnections([dead], ["gmail"])).toEqual([]);
+  });
+
   it("does not send revoked accounts alongside a reconnected toolkit", () => {
     const oldAccount = {
       id: "youtube-old",

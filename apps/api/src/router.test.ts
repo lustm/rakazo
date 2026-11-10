@@ -3753,6 +3753,26 @@ describe("connections.complete", () => {
     expect(row.providerRef).toBe("account-1");
   });
 
+  it("connects past a sibling attempt the provider reports dead", async () => {
+    const { complete, connector, connection, row } = pollFixture("pending");
+    row.providerRef = "request-2";
+    connection.findMany.mockResolvedValue([
+      { providerRef: "account-dead", status: "pending" },
+    ] as never);
+    const resolveConnectedAccountId = vi.fn(async (_userId: string, _slug: string, ref: string) =>
+      ref === "request-2" ? "account-2" : undefined,
+    );
+    Object.assign(connector, {
+      resolveConnectedAccountId,
+      listReconnectRefs: vi.fn(async () => ["account-dead"]),
+    });
+
+    await expect(complete()).resolves.toMatchObject({ body: { json: { status: "connected" } } });
+    expect(row.providerRef).toBe("account-2");
+    // The dead attempt is not waited on.
+    expect(resolveConnectedAccountId.mock.calls.map((call) => call[2])).toEqual(["request-2"]);
+  });
+
   it("stores the connected account a request id resolves to", async () => {
     const { complete, connector, row } = pollFixture("pending");
     row.providerRef = "request-1";

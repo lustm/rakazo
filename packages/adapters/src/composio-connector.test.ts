@@ -1323,6 +1323,81 @@ describe("composio tool mapping", () => {
     });
   });
 
+  it("connects the attempt that succeeded rather than an older one the provider reports dead", () => {
+    expect(
+      planLiveConnectionSync(
+        [
+          {
+            id: "row-old",
+            provider: "gmail",
+            status: "pending",
+            displayName: "Gmail",
+            providerRef: "ca_old",
+          },
+          {
+            id: "row-new",
+            provider: "gmail",
+            status: "pending",
+            displayName: "Gmail 2",
+            providerRef: "ca_new",
+          },
+        ],
+        ["gmail"],
+        ["ca_old"],
+      ),
+    ).toEqual({ connectIds: ["row-new"], revokeIds: ["row-old"] });
+  });
+
+  it("never revives an errored row whose account the provider reports dead", () => {
+    expect(
+      planLiveConnectionSync(
+        [
+          {
+            id: "row-dead",
+            provider: "gmail",
+            status: "error",
+            displayName: "Gmail",
+            providerRef: "ca_old",
+          },
+        ],
+        ["gmail"],
+        ["ca_old"],
+      ),
+    ).toEqual({ connectIds: [], revokeIds: ["row-dead"] });
+  });
+
+  it("drops a dead attempt beside a connected account instead of keeping it in flight", () => {
+    expect(
+      planLiveConnectionSync(
+        [
+          {
+            id: "row-gmail",
+            provider: "gmail",
+            status: "connected",
+            displayName: "Gmail",
+            providerRef: "ca_live",
+          },
+          {
+            id: "row-dead",
+            provider: "gmail",
+            status: "pending",
+            displayName: "Gmail 2",
+            providerRef: "ca_old",
+          },
+          {
+            id: "row-work",
+            provider: "gmail",
+            status: "pending",
+            displayName: "Work",
+            providerRef: "ca_new",
+          },
+        ],
+        ["gmail"],
+        ["ca_old"],
+      ),
+    ).toEqual({ connectIds: [], revokeIds: ["row-dead"] });
+  });
+
   it("keeps an in-flight additional account when the provider is already connected", () => {
     expect(
       planLiveConnectionSync(

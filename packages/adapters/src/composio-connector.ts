@@ -265,6 +265,7 @@ export type PluginConnectionRow = {
   provider: string;
   status: string;
   displayName: string;
+  providerRef?: string | null;
 };
 
 export function needsLivePluginSync(rows: { status: string }[]): boolean {
@@ -306,10 +307,18 @@ export function pickReusableConnection<T extends { id: string; status: string }>
   return rows.find((row) => row.status === "revoked" || row.status === "error");
 }
 
+/**
+ * `deadRefs` are accounts the provider reports dead (expired, failed, revoked). A row holding
+ * one is an abandoned attempt: a live account for its app belongs to some other attempt.
+ */
 export function planLiveConnectionSync(
   rows: PluginConnectionRow[],
   liveSlugs: string[],
+  deadRefs: readonly string[] = [],
 ): { connectIds: string[]; revokeIds: string[] } {
+  const dead = new Set(deadRefs);
+  const isDead = (row: PluginConnectionRow) =>
+    Boolean(row.providerRef && dead.has(row.providerRef));
   const live = new Set(liveSlugs.map(composioSlugKey).filter(Boolean));
   const connectIds: string[] = [];
   const connectedProviders = new Set(
@@ -321,7 +330,9 @@ export function planLiveConnectionSync(
     // Recover in-flight pending/error rows only. A revoked sibling stays
     // revoked even when another row (or the upstream listing) is live for
     // the same slug — reviving it would reattach a dead providerRef.
-    const reusable = matches.find((row) => row.status === "pending" || row.status === "error");
+    const reusable = matches.find(
+      (row) => (row.status === "pending" || row.status === "error") && !isDead(row),
+    );
     if (!reusable) continue;
     connectIds.push(reusable.id);
     connectedProviders.add(slug);
@@ -340,7 +351,11 @@ export function planLiveConnectionSync(
       if (connectIdSet.has(row.id)) return false;
       // Keep only in-flight additional-account pendings; clear abandoned errors
       // so live sync does not keep re-listing forever after a failed attempt.
-      if (row.status === "pending" && previouslyConnected.has(composioSlugKey(row.provider))) {
+      if (
+        row.status === "pending" &&
+        !isDead(row) &&
+        previouslyConnected.has(composioSlugKey(row.provider))
+      ) {
         return false;
       }
       return true;

@@ -654,16 +654,21 @@ async function buildApp(overrides: CreateAppOverrides): Promise<AppHandles> {
     artifacts,
     connector: stack.connector,
     connectors: stack.connector,
-    listConnectedPluginSlugs: async (userId) => {
+    listLivePluginConnections: async (userId) => {
       const provider = await integrationSettings.resolve("composio");
-      if (!provider) return [];
-      return provider.listConnectedExternalIds({
+      if (!provider) return { slugs: [], deadRefs: [] };
+      const context = {
         userId,
         spaceId: "",
         operationId: "connections.sync",
         traceId: "connections.sync",
         signal: AbortSignal.timeout(15_000),
-      });
+      };
+      const [slugs, deadRefs] = await Promise.all([
+        provider.listConnectedExternalIds(context),
+        provider.listReconnectRefs?.(context).catch(() => []) ?? [],
+      ]);
+      return { slugs, deadRefs };
     },
     secrets: [
       env.deploymentModelKey ?? "",

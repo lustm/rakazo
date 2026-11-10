@@ -53,13 +53,13 @@ export function connectedContext(
   };
 }
 
-export async function loadLivePluginSlugs(
-  listConnectedPluginSlugs: ExecutorDeps["listConnectedPluginSlugs"],
+export async function loadLivePluginConnections(
+  listLivePluginConnections: ExecutorDeps["listLivePluginConnections"],
   userId: string,
-): Promise<{ ok: true; slugs: string[] } | { ok: false }> {
-  if (!listConnectedPluginSlugs) return { ok: false };
+): Promise<({ ok: true } & { slugs: string[]; deadRefs: string[] }) | { ok: false }> {
+  if (!listLivePluginConnections) return { ok: false };
   try {
-    return { ok: true, slugs: await listConnectedPluginSlugs(userId) };
+    return { ok: true, ...(await listLivePluginConnections(userId)) };
   } catch {
     return { ok: false };
   }
@@ -70,8 +70,9 @@ export async function persistLivePluginConnections(
   owner: { userId: string; spaceId: string },
   rows: PluginConnectionRow[],
   liveSlugs: string[],
+  deadRefs: string[] = [],
 ): Promise<void> {
-  const sync = planLiveConnectionSync(rows, liveSlugs);
+  const sync = planLiveConnectionSync(rows, liveSlugs, deadRefs);
   if (sync.connectIds.length > 0) {
     await prisma.connection.updateMany({
       where: {

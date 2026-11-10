@@ -88,7 +88,7 @@ import { teamBotWorkspaceDirectory } from "./computer-support.js";
 import { checkpointRunComputerWorkspace } from "./computer-workspace.js";
 import {
   connectedContext,
-  loadLivePluginSlugs,
+  loadLivePluginConnections,
   persistLivePluginConnections,
   selectRunConnections,
 } from "./connection-context.js";
@@ -707,12 +707,19 @@ export function createRunExecutor(executorDeps: ExecutorDeps) {
         );
         let liveSlugs: string[] = [];
         if (needsLivePluginSync(composioRows)) {
-          const listing = await loadLivePluginSlugs(deps.listConnectedPluginSlugs, run.userId);
+          const listing = await loadLivePluginConnections(
+            deps.listLivePluginConnections,
+            run.userId,
+          );
           if (listing.ok) {
             liveSlugs = listing.slugs;
-            await persistLivePluginConnections(deps.prisma, run, composioRows, listing.slugs).catch(
-              () => undefined,
-            );
+            await persistLivePluginConnections(
+              deps.prisma,
+              run,
+              composioRows,
+              listing.slugs,
+              listing.deadRefs,
+            ).catch(() => undefined);
           }
         }
         const connectedComposio = mergeConnectedPlugins(composioRows, liveSlugs);

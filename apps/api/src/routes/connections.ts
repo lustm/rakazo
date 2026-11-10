@@ -37,13 +37,13 @@ async function reconcileConnections(
         connectorId,
         status: { in: ["pending", "connected"] },
       },
-      select: { id: true, provider: true, displayName: true, status: true },
+      select: { id: true, provider: true, displayName: true, status: true, providerRef: true },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     })
   ).filter((row: { provider: string }) =>
     connectedProviderKeys.has(row.provider.trim().toLowerCase()),
   );
-  const sync = planLiveConnectionSync(rows, connectedProviders);
+  const sync = planLiveConnectionSync(rows, connectedProviders, reconnectRefs);
   // One update per row so the credential event goes only to rows this call actually connected.
   const connectedIds: string[] = [];
   const updates = [
@@ -679,6 +679,15 @@ export function connectionsRoutes(ctx: RouterContext) {
                 // sibling's account. If a sibling ref cannot be resolved yet, leave
                 // this row pending so a later complete can re-resolve safely.
                 const excludeIds: string[] = [];
+                // An attempt whose account the provider reports dead was abandoned; it can
+                // neither hold this row's account nor finish later, so it does not block.
+                const deadRefs = new Set(
+                  siblings.length > 0
+                    ? ((await transactionConnector
+                        .listReconnectRefs?.(adapterContext)
+                        .catch(() => [])) ?? [])
+                    : [],
+                );
                 for (const sibling of siblings) {
                   const ref = sibling.providerRef?.trim();
                   // Slug-only refs cannot identify a concrete remote account; resolving
@@ -689,6 +698,7 @@ export function connectionsRoutes(ctx: RouterContext) {
                       return current;
                     continue;
                   }
+                  if (deadRefs.has(ref)) continue;
                   const resolvedSiblingId = await resolveAccountId(ref, []);
                   if (!resolvedSiblingId) return current;
                   excludeIds.push(resolvedSiblingId);

@@ -3,6 +3,14 @@
 Bot replies in the web app and the Electron desktop app can show a small card listing the
 tools the bot called during the run.
 
+The live working line is separate from this optional card. Each tool call can carry a short,
+task-specific description written by the model in the user's language, such as “Checking
+calendar availability.” Web, Electron, and mobile show it beside the working avatar, even
+when tool cards are hidden. It updates with the next call and yields to the reply. If the
+model omits it, a simple action label is used without commands, paths, URLs, or tool names.
+The runtime removes the display-only argument before executing the tool; this needs no
+additional model request.
+
 ## Behavior
 
 - Off by default, so chats stay clean. **Settings → General → Advanced → Show tool activity** turns it on. Nothing stored counts as off; only a saved "on" shows the cards.

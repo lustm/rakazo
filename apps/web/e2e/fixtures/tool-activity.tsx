@@ -60,7 +60,9 @@ const messages: ThreadMessage[] = [
     threadId: "thread-1",
     seq: 2,
     role: "bot",
-    blocks: live ? [stepsBlock] : [stepsBlock, { kind: "text", text: REPLY_TEXT }],
+    blocks: live
+      ? [stepsBlock, { kind: "progress", text: "Checking calendar availability", activity: true }]
+      : [stepsBlock, { kind: "text", text: REPLY_TEXT }],
     botId: "bot-1",
     runId: "run-1",
     createdAt,

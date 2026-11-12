@@ -41,6 +41,24 @@ async function setToggle(page: Page, on: boolean) {
   await toggle.scrollIntoViewIfNeeded();
 }
 
+test("a live task description shows with tool details hidden and disappears on completion", async ({
+  page,
+}, testInfo) => {
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    await openThread(page, "live");
+    await expect(page.getByRole("status")).toHaveText("Checking calendar availability");
+    await expect(page.getByTestId("tool-activity")).toHaveCount(0);
+    await expect(page.getByTestId("message-bot-bubble")).toHaveCount(0);
+    await expect(page.locator("body")).toHaveJSProperty("scrollWidth", viewport.width);
+    await captureScreenshot(page, testInfo, `task-status-${viewport.name}`);
+
+    await openThread(page, "done");
+    await expect(page.getByRole("status")).toHaveCount(0);
+    await expect(page.getByTestId("message-bot-bubble")).toHaveText(REPLY_TEXT);
+  }
+});
+
 test("tool activity shows for live and finished runs when the user turned it on", async ({
   page,
 }, testInfo) => {

@@ -1,28 +1,36 @@
 import { describe, expect, it } from "vitest";
-import { describeToolActivity } from "./pi-runtime-tools.js";
+import { describeToolActivity, STATUS_LINE } from "./pi-runtime-tools.js";
 
 describe("describeToolActivity", () => {
-  it("summarizes builtin tools with their most informative argument", () => {
+  it("uses the model's task description for any tool, including deferred calls", () => {
+    for (const name of ["shell", "mcp__calendar__list_events", "destination_write", "use_tool"]) {
+      expect(describeToolActivity(name, { [STATUS_LINE]: "查询当地天气", command: "curl …" })).toBe(
+        "查询当地天气",
+      );
+    }
+    expect(
+      describeToolActivity("use_tool", {
+        name: "render_plot",
+        arguments: { [STATUS_LINE]: "整理销售趋势" },
+      }),
+    ).toBe("整理销售趋势");
+  });
+
+  it("falls back to readable actions without commands or paths", () => {
     expect(describeToolActivity("shell", { command: "pnpm test --filter web" })).toBe(
-      "Running: pnpm test --filter web",
+      "Working on your request",
     );
-    expect(describeToolActivity("read_file", { path: "notes/plan.md" })).toBe(
-      "Reading notes/plan.md",
-    );
+    expect(describeToolActivity("read_file", { path: "notes/plan.md" })).toBe("Reading a file");
     expect(describeToolActivity("write_file", { path: "out.csv", content: "…" })).toBe(
-      "Writing out.csv",
+      "Writing a file",
     );
     expect(describeToolActivity("list_fleet", {})).toBe("Checking your bots");
     expect(describeToolActivity("render_plot", { spec: {} })).toBe("Rendering a chart");
-    expect(describeToolActivity("save_page", { help: true })).toBe(
-      "Reading the page kit reference",
-    );
+    expect(describeToolActivity("save_page", { help: true })).toBe("Preparing a page");
     expect(describeToolActivity("save_page", { title: "Plan", source: "x" })).toBe(
-      "Writing the page code",
+      "Creating a page",
     );
-    expect(describeToolActivity("add_mcp_server", { name: "Linear" })).toBe(
-      "Connecting MCP server: Linear",
-    );
+    expect(describeToolActivity("add_mcp_server", { name: "Linear" })).toBe("Connecting an app");
     expect(describeToolActivity("run_subagent", { name: "scout", task: "…" })).toBe(
       "Delegating to helper: scout",
     );
@@ -33,42 +41,47 @@ describe("describeToolActivity", () => {
       "Searching the web: rakazo agents",
     );
     expect(describeToolActivity("web_fetch", { url: "https://example.com" })).toBe(
-      "Reading page: https://example.com/",
+      "Reading a page",
     );
   });
 
-  it("names MCP server and remote tool", () => {
-    expect(describeToolActivity("mcp__brex__list_expenses", {})).toBe("Using brex: list_expenses");
-    expect(describeToolActivity("mcp__demo-oauth__greet", {})).toBe("Using demo-oauth: greet");
+  it("keeps technical tool names out of fallback labels", () => {
+    expect(describeToolActivity("mcp__calendar__list_events", {})).toBe(
+      "Working with a connected app",
+    );
+    expect(describeToolActivity("destination_write", undefined)).toBe("Working on your request");
+    expect(describeToolActivity("find_tool", {})).toBe("Preparing the next step");
   });
 
-  it("truncates long details and collapses whitespace", () => {
+  it("bounds the status line and collapses whitespace", () => {
     const long = `x${"y".repeat(200)}`;
-    const line = describeToolActivity("shell", { command: `a\n\t${long}` });
-    expect(line.length).toBeLessThanOrEqual("Running: ".length + 91);
+    const line = describeToolActivity("shell", { [STATUS_LINE]: `a\n\t${long}` });
+    expect(line.length).toBeLessThanOrEqual(61);
     expect(line).toContain("…");
     expect(line).not.toContain("\n");
-    expect(line).toMatch(/^Running: a x/);
+    expect(line.startsWith("a x")).toBe(true);
+    expect(describeToolActivity("shell", { [STATUS_LINE]: "  查询\n\t当地天气  " })).toBe(
+      "查询 当地天气",
+    );
   });
 
-  it("redacts credentials from activity details", () => {
+  it("redacts recognizable credentials from model status lines", () => {
     const token = "fake-token";
     const line = describeToolActivity("shell", {
-      command: `curl -H 'Authorization: Bearer ${token}' https://example.test?api_key=fake-key password=fake-password`,
+      [STATUS_LINE]: `Checking Bearer ${token} api_key=fake-key`,
     });
 
     expect(line).toContain("Bearer [redacted]");
     expect(line).toContain("api_key=[redacted]");
     expect(line).not.toContain(token);
     expect(line).not.toContain("fake-key");
-    expect(line).not.toContain("fake-password");
   });
 
-  it("strips signed-URL query and fragment from web_fetch activity", () => {
+  it("does not expose URL arguments in fallback labels", () => {
     const line = describeToolActivity("web_fetch", {
       url: "https://user:secret@cdn.example.test/doc.pdf?X-Amz-Signature=abc123&token=leak#frag",
     });
-    expect(line).toBe("Reading page: https://cdn.example.test/doc.pdf");
+    expect(line).toBe("Reading a page");
     expect(line).not.toContain("secret");
     expect(line).not.toContain("X-Amz-Signature");
     expect(line).not.toContain("token=");
@@ -80,12 +93,21 @@ describe("describeToolActivity", () => {
     const line = describeToolActivity("web_fetch", {
       url: "https://user:secret@[",
     });
-    expect(line).toBe("Reading page: [invalid URL]");
+    expect(line).toBe("Reading a page");
     expect(line).not.toContain("secret");
     expect(line).not.toContain("user:");
   });
 
-  it("falls back to the tool name", () => {
-    expect(describeToolActivity("destination_write", undefined)).toBe("Using destination_write");
+  it.each([undefined, null, 42, {}, "", " \n\t "])(
+    "ignores an absent or invalid status (%j)",
+    (value) => {
+      expect(describeToolActivity("read_file", { [STATUS_LINE]: value })).toBe("Reading a file");
+    },
+  );
+
+  it("does not interpret a connector's own status_line argument as a working label", () => {
+    expect(describeToolActivity("destination_write", { status_line: "Record status" })).toBe(
+      "Working on your request",
+    );
   });
 });

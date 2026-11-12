@@ -36,6 +36,7 @@ const fakeAgentState = vi.hoisted(() => ({
   abortCount: 0,
   tools: [] as Array<{
     name: string;
+    parameters: { properties: Record<string, unknown>; required?: string[] };
     executionMode?: string;
     prepareArguments?: (args: unknown) => Record<string, unknown>;
     execute: (toolCallId: string, params: Record<string, unknown>) => Promise<unknown>;
@@ -124,7 +125,8 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
         this.emit({
           type: "tool_execution_start",
           toolName: target.name,
-          args,
+          // Pi emits the original model arguments before preparation and validation.
+          args: rawArgs,
         });
         fakeAgentState.toolResult = await target.execute("call-1", args);
         return;
@@ -481,7 +483,7 @@ import {
 import { MISSING_TOOL_FINAL_RESPONSE_ERROR, PiAgentRuntime } from "./pi-runtime.js";
 import { providerFailureText } from "./pi-runtime-errors.js";
 import { TOOL_RESULT_TEXT_LIMIT } from "./pi-runtime-limits.js";
-import { maxToolCallsPerTurn } from "./pi-runtime-tools.js";
+import { maxToolCallsPerTurn, STATUS_LINE } from "./pi-runtime-tools.js";
 import { toolCompletionAuditPayload } from "./tool-completion-audit.js";
 import { serializeTurnCheckpoint } from "./turn-checkpoint.js";
 import { midTaskMessageFromPrompt, midTaskMessagePrompt } from "./user-progress.js";
@@ -907,6 +909,71 @@ describe("Pi connector tool dispatch", () => {
     else process.env.MAX_TOOL_CALLS_PER_TURN = previousMaxToolCalls;
   });
 
+  it.each(["shell", "connector", "deferred"])(
+    "shows a task description while keeping %s execution arguments clean",
+    async (kind) => {
+      const status = "查询当地天气";
+      const connector: ConnectorTool = {
+        ...destinationTool,
+        inputSchema: {
+          type: "object",
+          properties: { status_line: { type: "string" } },
+          required: ["status_line"],
+          additionalProperties: false,
+        },
+      };
+      const tools =
+        kind === "shell" ? [shellTool] : kind === "connector" ? [connector] : [scheduleCancelTool];
+      const expectedArgs =
+        kind === "shell"
+          ? { command: "curl https://example.test/weather" }
+          : kind === "connector"
+            ? { status_line: "Record status" }
+            : { routineId: "routine-1" };
+      fakeAgentState.invoke = {
+        name: kind === "shell" ? "shell" : kind === "connector" ? "destination_write" : "use_tool",
+        args: {
+          ...(kind === "deferred"
+            ? { name: "schedule_cancel", arguments: { ...expectedArgs, [STATUS_LINE]: status } }
+            : expectedArgs),
+          [STATUS_LINE]: status,
+        },
+      };
+      const originalSchema = JSON.stringify(tools);
+      const executeTool = vi.fn(async () => ({ ok: true }));
+      const events = [];
+      for await (const event of new PiAgentRuntime().run(
+        {
+          botId: "b",
+          threadId: "t",
+          runId: "status-test",
+          prompt: "查询当地天气",
+          instructions: "",
+          history: [],
+          tools,
+          model: { provider: "test", id: "dispatch-test-model" },
+          executeTool,
+        },
+        { signal: new AbortController().signal },
+      )) {
+        events.push(event);
+      }
+      expect(events).toContainEqual({ type: "progress", text: status, activity: true });
+      expect(executeTool).toHaveBeenCalledExactlyOnceWith(
+        kind === "shell" ? "shell" : kind === "connector" ? "destination.write" : "schedule_cancel",
+        expectedArgs,
+        expect.any(String),
+        kind === "connector" ? connector.route : undefined,
+        { onShellStillRunning: expect.any(Function) },
+      );
+      for (const tool of fakeAgentState.tools) {
+        expect(tool.parameters.properties[STATUS_LINE]).toMatchObject({ type: "string" });
+        expect(tool.parameters.required ?? []).not.toContain(STATUS_LINE);
+      }
+      expect(JSON.stringify(tools)).toBe(originalSchema);
+    },
+  );
+
   it.each([undefined, "", ".", "/home/rakazo", "subdir"])(
     "preserves executor-owned shell cwd defaults (%j)",
     async (cwd) => {
@@ -1195,7 +1262,7 @@ describe("Pi connector tool dispatch", () => {
 
     expect(events).toContainEqual({
       type: "progress",
-      text: "Using destination_write",
+      text: "Working on your request",
       activity: true,
     });
     expect(events).not.toContainEqual({

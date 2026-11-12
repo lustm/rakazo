@@ -37,6 +37,7 @@ import { VERBATIM_TOOL_RESULTS } from "./runtime-context.js";
 import { SCHEDULE_TOOL_NAMES } from "./schedule-tools.js";
 import type { FinishedShellCommand } from "./shell-command-stream.js";
 import { textContentArg } from "./tool-text.js";
+import { narrationStatusLine } from "./user-progress.js";
 import { isVerbatimMcpResult } from "./verbatim-mcp-result.js";
 
 export interface ToolCallBudget {
@@ -170,37 +171,71 @@ export function normalizeAgentToolName(name: string): string {
   return (normalized || FALLBACK_AGENT_TOOL_NAME).slice(0, MAX_AGENT_TOOL_NAME_LENGTH);
 }
 
+/**
+ * Every tool takes an extra status line: a few plain words the model writes for the person
+ * watching, shown live in place of a technical description of the call. It never reaches the tool.
+ * Namespace the field so a connector's own `status_line` argument keeps its meaning.
+ */
+export const STATUS_LINE = "__rakazo_status_line";
 const ACTIVITY_DETAIL_LIMIT = 90;
+
+/** `schema` with the optional status line every tool call may carry. */
+function withStatusLine<T>(schema: T): T {
+  const properties = (schema as { properties?: Record<string, unknown> }).properties;
+  if (properties && !(STATUS_LINE in properties)) {
+    properties[STATUS_LINE] = {
+      type: "string",
+      description:
+        "A short description of what this step does for the user, in their language. No tool names, commands, paths, code, URLs, or secrets.",
+    };
+  }
+  return schema;
+}
+
+/** A call's arguments without its status line. */
+function withoutStatusLine(args: unknown): Record<string, unknown> {
+  if (!args || typeof args !== "object") return {};
+  const { [STATUS_LINE]: _status, ...rest } = args as Record<string, unknown>;
+  return rest;
+}
+
+/** The status line the model gave a call, made safe to show, if it gave one. */
+function statusLineOf(record: Record<string, unknown>): string | undefined {
+  const raw = record[STATUS_LINE];
+  if (typeof raw !== "string") return undefined;
+  return narrationStatusLine(sanitizeSensitiveText(raw)) || undefined;
+}
 
 /** One human-readable line describing a tool call, shown live in the thread. */
 export function describeToolActivity(toolName: string, args: unknown): string {
   const record = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+  const status = statusLineOf(record);
+  if (status) return status;
   if (toolName === USE_TOOL) return describeToolActivity(String(record.name), record.arguments);
-  if (toolName === FIND_TOOL) return "Finding a tool";
+  if (toolName === FIND_TOOL) return "Preparing the next step";
   const detail = (value: unknown): string => {
     const text = sanitizeSensitiveText(String(value ?? ""))
       .replaceAll(/\s+/g, " ")
       .trim();
     return text.length > ACTIVITY_DETAIL_LIMIT ? `${text.slice(0, ACTIVITY_DETAIL_LIMIT)}…` : text;
   };
-  if (toolName === "shell") return `Running: ${detail(record.command)}`;
-  if (toolName === "user_computer_shell")
-    return `Running on your computer: ${detail(record.command)}`;
+  // Commands are code; the person watching gets what is happening, not the command line.
+  if (toolName === "shell") return "Working on your request";
+  if (toolName === "user_computer_shell") return "Working on your computer";
   if (toolName === "user_computer_observe") return `Looking at ${detail(record.app)}`;
   if (toolName === "user_computer_act") return `Using ${detail(record.app)}`;
-  if (toolName === "read_file") return `Reading ${detail(record.path)}`;
-  if (toolName === "write_file") return `Writing ${detail(record.path)}`;
-  if (toolName === "list_files") return `Listing ${detail(record.path ?? ".")}`;
-  if (toolName === "attach_file") return `Attaching ${detail(record.path)}`;
-  if (toolName === "open_path") return `Opening ${detail(record.path)}`;
+  if (toolName === "read_file") return "Reading a file";
+  if (toolName === "write_file") return "Writing a file";
+  if (toolName === "list_files") return "Checking files";
+  if (toolName === "attach_file") return "Attaching a file";
+  if (toolName === "open_path") return "Opening a file";
   if (toolName === "render_plot") return "Rendering a chart";
   if (toolName === "save_page") {
-    return record.help === true ? "Reading the page kit reference" : "Writing the page code";
+    return record.help === true ? "Preparing a page" : "Creating a page";
   }
-  if (toolName === "add_mcp_server") return `Connecting MCP server: ${detail(record.name)}`;
+  if (toolName === "add_mcp_server") return "Connecting an app";
   if (toolName === "computer_observe") return "Looking at the screen";
-  if (toolName === "browser_navigate")
-    return `Opening page: ${detail(redactActivityUrl(record.url))}`;
+  if (toolName === "browser_navigate") return "Opening a page";
   if (toolName === "browser_snapshot") return "Reading the page";
   if (toolName === "browser_act") return "Using the page";
   if (toolName === "computer_act") return "Operating the computer";
@@ -215,21 +250,17 @@ export function describeToolActivity(toolName: string, args: unknown): string {
   if (toolName === "set_child_bot_model") return "Setting a bot's model";
   if (toolName === "create_child_routine") return `Scheduling routine: ${detail(record.name)}`;
   if (toolName === "remember") return "Saving a note to memory";
-  if (toolName === "save_shared_memory") return `Saving shared memory: ${detail(record.path)}`;
+  if (toolName === "save_shared_memory") return "Saving shared memory";
   if (toolName === "web_search") return `Searching the web: ${detail(record.query)}`;
-  if (toolName === "web_fetch") return `Reading page: ${detail(redactActivityUrl(record.url))}`;
-  if (toolName === "skill_read")
-    return record.file
-      ? `Reading ${detail(record.file)} from ${detail(record.name)}`
-      : `Reading skill: ${detail(record.name)}`;
+  if (toolName === "web_fetch") return "Reading a page";
+  if (toolName === "skill_read") return "Reading task guidance";
   if (toolName === "skill_create") return `Creating skill: ${detail(record.name ?? "skill")}`;
   if (toolName === "skill_update")
     return `Updating skill: ${detail(record.name ?? record.skillId)}`;
   if (toolName === "skill_delete")
     return `Deleting skill: ${detail(record.name ?? record.skillId)}`;
-  const mcp = toolName.match(/^mcp__(.+?)__(.+)$/);
-  if (mcp) return `Using ${mcp[1]}: ${mcp[2]}`;
-  return `Using ${toolName}`;
+  if (toolName.startsWith("mcp__")) return "Working with a connected app";
+  return "Working on your request";
 }
 
 /**
@@ -330,9 +361,9 @@ function toAgentTool(
     tool.name === "request_secret"
       ? { executionMode: "sequential" as const }
       : {}),
-    parameters: parametersFor(tool),
+    parameters: withStatusLine(parametersFor(tool)),
     prepareArguments: (args: unknown) => {
-      const raw = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+      const raw = withoutStatusLine(args);
       if (tool.name === "remember") {
         return {
           content: String(raw.content ?? ""),
@@ -430,7 +461,7 @@ function toAgentTool(
             (host.depth !== 0 || !host.computerModeAllowed())
           )
             throw new Error("Enter top-level computer mode before using computer tools");
-          const args = (params ?? {}) as Record<string, unknown>;
+          const args = withoutStatusLine(params);
           const keepToolResultWhole = (name: string, callArgs: Record<string, unknown>) =>
             VERBATIM_TOOL_RESULTS.has(name) ||
             isVerbatimMcpResult(name, callArgs, host.request.verbatimMcpServers);
@@ -693,23 +724,6 @@ function boundAgentToolResult<T>(result: AgentToolResult<T>): AgentToolResult<T>
     ...result,
     content: clipToolResultContent(result.content),
   };
-}
-
-/** Origin + path only for activity chips; drop userinfo, query, and fragment. */
-function redactActivityUrl(value: unknown): string {
-  const raw = String(value ?? "").trim();
-  if (!raw) return raw;
-  try {
-    const url = new URL(raw);
-    url.username = "";
-    url.password = "";
-    url.search = "";
-    url.hash = "";
-    return url.toString();
-  } catch {
-    // Never echo unparsed input — it may still contain userinfo/secrets.
-    return "[invalid URL]";
-  }
 }
 
 export interface EventQueue {

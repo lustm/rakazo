@@ -1,28 +1,34 @@
 import { RESPONSE_STREAMING_STORAGE_KEY } from "@rakazo/core";
-import { describe, expect, it } from "vitest";
-import {
-  persistResponseStreamingPreference,
-  resolveResponseStreamingPreference,
-} from "./response-streaming";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.resetModules();
+});
 
 describe("response streaming preference", () => {
-  it("streams unless a saved choice turns it off", () => {
-    expect(resolveResponseStreamingPreference({ stored: "on" })).toBe("on");
-    expect(resolveResponseStreamingPreference({ stored: "off" })).toBe("off");
-    expect(resolveResponseStreamingPreference({ stored: null })).toBe("on");
-    expect(resolveResponseStreamingPreference({ stored: "" })).toBe("on");
-  });
-
-  it("persists through storage helpers", () => {
+  it("streams unless a saved choice turns it off", async () => {
     const store = new Map<string, string>();
-    const storage = {
+    vi.stubGlobal("localStorage", {
       getItem: (key: string) => store.get(key) ?? null,
       setItem: (key: string, value: string) => {
         store.set(key, value);
       },
-    };
-    persistResponseStreamingPreference("on", storage);
+    });
+    const { responseStreamingPreference } = await import("./response-streaming");
+    expect(responseStreamingPreference.get()).toBe(true);
+    responseStreamingPreference.set(true);
     expect(store.get(RESPONSE_STREAMING_STORAGE_KEY)).toBe("on");
-    expect(resolveResponseStreamingPreference({ storage })).toBe("on");
+    responseStreamingPreference.set(false);
+    expect(store.get(RESPONSE_STREAMING_STORAGE_KEY)).toBe("off");
+  });
+
+  it("reads a saved choice", async () => {
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => (key === RESPONSE_STREAMING_STORAGE_KEY ? "on" : null),
+      setItem: () => undefined,
+    });
+    const { responseStreamingPreference } = await import("./response-streaming");
+    expect(responseStreamingPreference.get()).toBe(true);
   });
 });

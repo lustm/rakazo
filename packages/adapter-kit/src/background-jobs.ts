@@ -22,14 +22,47 @@ const payloadSchemas = {
   }),
   "skill.teaching-expire": z.object({ skillId: z.string().min(1) }),
   "call.expire": z.object({ threadId: z.string().min(1), callId: z.string().min(1) }),
-  "history.compact": z.object({ threadId: z.string().min(1) }),
+  // The member whose turn asked for it, who pays; older jobs name only the thread.
+  "history.compact": z.object({
+    threadId: z.string().min(1),
+    userId: z.string().min(1).optional(),
+  }),
+  "memory.purge-history": z.object({
+    spaceId: z.string().min(1),
+    userId: z.string().min(1),
+    botId: z.string().min(1),
+    threadId: z.string().min(1),
+    generations: z.array(z.number().int().min(0)).min(1),
+    connectionIdentity: z.string().min(1),
+  }),
+  "memory.retain-turn": z.object({
+    runId: z.string().min(1),
+    messageIds: z.array(z.string().min(1)).optional(),
+    pending: z
+      .object({
+        token: z.string().min(1).optional(),
+        unconfirmed: z.literal(true).optional(),
+        generation: z.number().int().min(0),
+        checks: z.number().int().min(0),
+        connectionIdentity: z.string().min(1),
+        source: z.object({
+          spaceId: z.string().min(1),
+          userId: z.string().min(1),
+          botId: z.string().min(1),
+          threadId: z.string().min(1),
+        }),
+      })
+      .optional(),
+  }),
   "messaging.deliver": z.object({ runId: z.string().min(1).optional() }),
+  "messaging.progress": z.object({ runId: z.string().min(1) }),
   "messaging.credential-cleanup": z.object({
     installationId: z.string().min(1),
     ref: z.string().min(1),
   }),
   "cloud_agent.poll": z.object({ agentId: z.string().min(1) }),
   "purchase.poll": z.object({ purchaseId: z.string().min(1) }),
+  "media.poll": z.object({ jobId: z.string().min(1) }),
   "push.receipt": z.object({
     userId: z.string().min(1),
     ticketId: z.string().min(1),
@@ -160,6 +193,19 @@ export function historyCompactJobKey(threadId: string): string {
  */
 export const HISTORY_COMPACT_MAX_ATTEMPTS = 4;
 
+/**
+ * Delivers the interim messages of a run a chat app started, while the run is still going. Few
+ * attempts: each one drains the whole outbox, and the end-of-run mirror sends them anyway.
+ */
+export function messagingProgressJob(runId: string): BackgroundJob {
+  return {
+    name: "messaging.progress",
+    payload: { runId },
+    replaceKey: `messaging.progress:${runId}`,
+    maxAttempts: 3,
+  };
+}
+
 export function messagingDeliverJob(runId?: string, availableAt?: Date): BackgroundJob {
   return {
     name: "messaging.deliver",
@@ -169,12 +215,52 @@ export function messagingDeliverJob(runId?: string, availableAt?: Date): Backgro
   };
 }
 
-export function historyCompactJob(threadId: string): BackgroundJob {
+export function historyCompactJob(threadId: string, userId?: string): BackgroundJob {
   return {
     name: "history.compact",
-    payload: { threadId },
+    payload: userId ? { threadId, userId } : { threadId },
     replaceKey: historyCompactJobKey(threadId),
     maxAttempts: HISTORY_COMPACT_MAX_ATTEMPTS,
+  };
+}
+
+export function memoryPurgeHistoryJob(
+  payload: BackgroundJobPayloads["memory.purge-history"],
+): BackgroundJob {
+  return {
+    name: "memory.purge-history",
+    payload,
+    replaceKey: `memory.purge-history:${JSON.stringify([payload.spaceId, payload.botId, payload.threadId, payload.generations, payload.connectionIdentity])}`,
+    maxAttempts: 12,
+  };
+}
+
+export function memoryRetainTurnRecoveryJobKey(runId: string): string {
+  return `memory.retain-turn:${runId}:recover`;
+}
+
+/** Retries reuse the run's operation id, so the memory service never stores a turn twice. */
+export function memoryRetainTurnJob(
+  runId: string,
+  messageIds: string[] = [],
+  options: {
+    pending?: BackgroundJobPayloads["memory.retain-turn"]["pending"];
+    availableAt?: Date;
+  } = {},
+): BackgroundJob {
+  return {
+    name: "memory.retain-turn",
+    payload: {
+      runId,
+      ...(messageIds.length ? { messageIds } : {}),
+      ...(options.pending ? { pending: options.pending } : {}),
+    },
+    // A slow recovery check must not overwrite a subsequently confirmed operation token.
+    replaceKey: options.pending?.unconfirmed
+      ? memoryRetainTurnRecoveryJobKey(runId)
+      : `memory.retain-turn:${runId}${options.pending ? ":settle" : ""}`,
+    ...(options.availableAt ? { availableAt: options.availableAt } : {}),
+    maxAttempts: 4,
   };
 }
 
@@ -207,6 +293,15 @@ export function purchasePollJob(purchaseId: string, availableAt?: Date): Backgro
     name: "purchase.poll",
     payload: { purchaseId },
     replaceKey: `purchase.poll:${purchaseId}`,
+    ...(availableAt ? { availableAt } : {}),
+  };
+}
+
+export function mediaPollJob(jobId: string, availableAt?: Date): BackgroundJob {
+  return {
+    name: "media.poll",
+    payload: { jobId },
+    replaceKey: `media.poll:${jobId}`,
     ...(availableAt ? { availableAt } : {}),
   };
 }

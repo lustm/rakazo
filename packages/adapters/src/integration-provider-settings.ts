@@ -11,6 +11,8 @@ import { ComposioConnector } from "./composio-connector.js";
 import { credentialDigest } from "./credential-digest.js";
 import { PipedreamConnector } from "./pipedream-connector.js";
 
+const PLUGIN_SLUG_PROVIDER: IntegrationProviderId = "composio";
+
 /** Resolve persisted credentials on every operation so API and workers observe changes.
  * Cache adapters by ciphertext to preserve sessions without retaining old credentials. */
 export class IntegrationProviderSettings {
@@ -108,6 +110,26 @@ export class IntegrationProviderSettings {
     this.cache.delete(config.provider);
   }
 
+  /** Connected app slugs from the provider whose app ids match plugin slugs. */
+  async listLivePluginConnections(
+    userId: string,
+  ): Promise<{ slugs: string[]; deadRefs: string[] }> {
+    const provider = await this.resolve(PLUGIN_SLUG_PROVIDER);
+    if (!provider) return { slugs: [], deadRefs: [] };
+    const context = {
+      userId,
+      spaceId: "",
+      operationId: "connections.sync",
+      traceId: "connections.sync",
+      signal: AbortSignal.timeout(15_000),
+    };
+    const [slugs, deadRefs] = await Promise.all([
+      provider.listConnectedExternalIds(context),
+      provider.listReconnectRefs?.(context).catch(() => []) ?? [],
+    ]);
+    return { slugs, deadRefs };
+  }
+
   providers(): ManagedConnectorProvider[] {
     return IntegrationProviderIdSchema.options.map(
       (id) => new ConfiguredIntegrationProvider(id, this),
@@ -178,6 +200,9 @@ class ConfiguredIntegrationProvider implements ManagedConnectorProvider {
   }
   async listConnectedExternalIds(context: AdapterContext) {
     return (await this.resolve())?.listConnectedExternalIds(context) ?? [];
+  }
+  async needsReconnect(context: AdapterContext, externalId: string) {
+    return (await (await this.resolve())?.needsReconnect?.(context, externalId)) ?? false;
   }
   async listReconnectRefs(context: AdapterContext) {
     return (await (await this.resolve())?.listReconnectRefs?.(context)) ?? [];

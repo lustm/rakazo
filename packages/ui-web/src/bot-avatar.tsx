@@ -1,10 +1,10 @@
-import type { BotAvatarSet } from "@rakazo/contracts";
-import type { BotColorDef, LogoAvatarActivity } from "@rakazo/core";
+import type { BotAvatarSet, BotColorDef } from "@rakazo/contracts";
+import { BOT_COLOR_LIST } from "@rakazo/contracts";
+import type { LogoAvatarActivity } from "@rakazo/core";
 import {
   ACTIVE_RUN_STATUSES,
   avatarIdentitySeed,
   BOT_AVATAR_COLORS,
-  BOT_COLOR_LIST,
   botBodyShapePath,
   botEyeTone,
   DEFAULT_BOT_AVATAR_COLOR,
@@ -26,7 +26,8 @@ import { organicFrame, restPose } from "./organic-motion.js";
 import "./styles.css";
 
 export type { BotColorDef };
-export { BOT_AVATAR_COLORS, BOT_COLOR_LIST, DEFAULT_BOT_AVATAR_COLOR, resolvePersonaColorDef };
+export const BOT_COLORS = BOT_AVATAR_COLORS;
+export { BOT_COLOR_LIST, DEFAULT_BOT_AVATAR_COLOR, resolvePersonaColorDef };
 
 const SHIPPED_SHAPE_KEYS = SHIPPED_BOT_AVATAR_SHAPE_KEYS;
 
@@ -305,6 +306,7 @@ export function Wordmark({ className }: { className?: string }) {
         <span className="h-4 w-[7px] rounded-full bg-primary" />
         <span className="h-4 w-[7px] rounded-full bg-primary" />
       </div>
+      {/* off-scale: wordmark sized to the 44px logo mark */}
       <span className="font-[Aeonik,ui-sans-serif] text-[28px] tracking-tight text-foreground">
         Rakazo
       </span>

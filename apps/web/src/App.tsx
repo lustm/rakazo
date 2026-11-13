@@ -31,7 +31,7 @@ import { identifyMonitoringUser } from "./lib/monitoring";
 import { markAfterPaint, markOnce } from "./lib/performance";
 import { lazyComponent } from "./lib/preload-recovery";
 import { QueryUserProvider, setQueryUser } from "./lib/query";
-import { getRemoteImagesEnabled, subscribeRemoteImages } from "./lib/remote-images-preference";
+import { remoteImagesPreference } from "./lib/remote-images-preference";
 import { hasSignedInBefore, rememberSignedIn } from "./lib/returning-user";
 import { rpc } from "./lib/rpc";
 import {
@@ -41,6 +41,12 @@ import {
   sessionRetryDelayMs,
   showSessionUnavailable,
 } from "./lib/session-gate";
+import {
+  MCP_OAUTH_CALLBACK_PATH,
+  newAccountDestination,
+  SLACK_INSTALL_CALLBACK_PATH,
+  signInNext,
+} from "./lib/sign-in-next";
 import { syncLogOutFailure } from "./lib/sign-out";
 import { completeSsoCallback, SSO_CALLBACK_PATH } from "./lib/sso-flow";
 import { IntegrationCallbackPage } from "./pages/IntegrationCallback";
@@ -73,6 +79,9 @@ const AdminAccessPage = lazyComponent(() =>
 const NavLinkPage = lazyComponent(() =>
   import("./pages/NavLinkPage").then((module) => module.NavLinkPage),
 );
+const InvitePage = lazyComponent(() =>
+  import("./pages/Invite").then((module) => module.InvitePage),
+);
 
 function SsoCallbackPage() {
   useEffect(() => {
@@ -87,11 +96,7 @@ const linkFavicons: LinkFavicons = {
 };
 
 export function App() {
-  const loadRemoteImages = useSyncExternalStore(
-    subscribeRemoteImages,
-    getRemoteImagesEnabled,
-    () => false,
-  );
+  const loadRemoteImages = remoteImagesPreference.use();
   return (
     <RemoteImagesContext.Provider value={loadRemoteImages}>
       <LinkFaviconsContext.Provider value={linkFavicons}>
@@ -111,21 +116,9 @@ export function App() {
   );
 }
 
-const MCP_OAUTH_CALLBACK_PATH = "/mcp/oauth/callback";
-const SLACK_INSTALL_CALLBACK_PATH = "/messaging/slack/callback";
-
 function SessionApp() {
   const [searchParams] = useSearchParams();
-  const next = searchParams.get("next") ?? "";
-  // A connector sign-in started on another device lands here signed out; finish it after sign-in.
-  const signInDestination =
-    next === "/integrations/setup" ||
-    next === "/admin/plugins" ||
-    next === "/admin/access" ||
-    next.startsWith(`${MCP_OAUTH_CALLBACK_PATH}?`) ||
-    next.startsWith(`${SLACK_INSTALL_CALLBACK_PATH}?`)
-      ? next
-      : "/app";
+  const next = signInNext(searchParams.get("next"));
   const ticketBoardEnabled = useSyncExternalStore(
     subscribeTicketBoardEnabled,
     getTicketBoardEnabled,
@@ -204,17 +197,17 @@ function SessionApp() {
               <Route
                 path="/sign-in"
                 element={
-                  user ? (
-                    <Navigate to={signInDestination} replace />
-                  ) : (
-                    <AuthPage key="in" mode="in" />
-                  )
+                  user ? <Navigate to={next ?? "/app"} replace /> : <AuthPage key="in" mode="in" />
                 }
               />
               <Route
                 path="/sign-up"
                 element={
-                  user ? <Navigate to="/onboarding" replace /> : <AuthPage key="up" mode="up" />
+                  user ? (
+                    <Navigate to={newAccountDestination(next)} replace />
+                  ) : (
+                    <AuthPage key="up" mode="up" />
+                  )
                 }
               />
               <Route
@@ -268,6 +261,16 @@ function SessionApp() {
                     <AdminPluginsPage />
                   ) : (
                     <Navigate to="/sign-in?next=/admin/plugins" replace />
+                  )
+                }
+              />
+              <Route
+                path="/invite/:token"
+                element={
+                  user ? (
+                    <InvitePage />
+                  ) : (
+                    <Navigate to={`/sign-in?next=${encodeURIComponent(pathname)}`} replace />
                   )
                 }
               />
@@ -340,7 +343,7 @@ function SessionUnavailable({ refetch }: { refetch: () => Promise<void> }) {
     <div className="grid h-full place-items-center bg-background px-6 text-center">
       <div className="flex flex-col items-center">
         <LoadingState label={t`Reconnecting`} />
-        <p className="mt-3 text-[13.5px] text-muted-foreground/80">
+        <p className="mt-3 text-body text-muted-foreground/80">
           <Trans>Can&apos;t reach the server.</Trans>
         </p>
         <div className="mt-4">
@@ -368,7 +371,7 @@ function AppFailed() {
       data-rakazo-app-state="failed"
     >
       <div className="flex flex-col items-center">
-        <p className="text-[13.5px] text-muted-foreground/80">
+        <p className="text-body text-muted-foreground/80">
           <Trans>Something went wrong. Try again.</Trans>
         </p>
         <div className="mt-4">

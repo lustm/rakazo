@@ -29,6 +29,7 @@ function fixture() {
   };
   const adapter = {
     listConnectedExternalIds: vi.fn(async () => []),
+    listReconnectRefs: vi.fn(async () => []),
     catalog: vi.fn(async () => []),
     discoverTools: vi.fn(async () => []),
   } as unknown as ManagedConnectorProvider;
@@ -64,6 +65,23 @@ describe("integration provider settings", () => {
       provider: "composio",
       apiKey: "fake-replacement-key",
     });
+  });
+  it("lists connected plugin slugs and abandoned accounts for the user, or none before setup", async () => {
+    const f = fixture();
+    expect(await f.settings.listLivePluginConnections("user-1")).toEqual({
+      slugs: [],
+      deadRefs: [],
+    });
+    await f.settings.save({ provider: "composio", apiKey: "fake-plugin-key" }, context);
+    vi.mocked(f.adapter.listConnectedExternalIds).mockResolvedValueOnce(["gmail"]);
+    vi.mocked(f.adapter.listReconnectRefs!).mockResolvedValueOnce(["dead-account"]);
+    expect(await f.settings.listLivePluginConnections("user-1")).toEqual({
+      slugs: ["gmail"],
+      deadRefs: ["dead-account"],
+    });
+    expect(f.adapter.listConnectedExternalIds).toHaveBeenLastCalledWith(
+      expect.objectContaining({ userId: "user-1" }),
+    );
   });
   it("preserves working settings and hides provider error details on failed verification", async () => {
     const f = fixture();
@@ -112,6 +130,7 @@ describe("integration provider settings", () => {
     const warm = vi.fn(async () => undefined);
     const adapter = {
       listConnectedExternalIds: vi.fn(async () => []),
+      listReconnectRefs: vi.fn(async () => []),
       catalog: vi.fn(async () => []),
       discoverTools: vi.fn(async () => []),
       warmDirectory: warm,
@@ -136,6 +155,26 @@ describe("integration provider settings", () => {
     settings.warmDirectories();
     await vi.waitFor(() => expect(warm).toHaveBeenCalledOnce());
   });
+  it.each([false, true, undefined])(
+    "forwards the prepared provider's reconnect requirement %s",
+    async (reconnect) => {
+      const f = fixture();
+      const needsReconnect = vi.fn(async () => reconnect ?? false);
+      if (reconnect !== undefined) f.adapter.needsReconnect = needsReconnect;
+      await f.settings.save({ provider: "composio", apiKey: "fake-key" }, context);
+      const wrapper = f.settings
+        .providers()
+        .find((provider) => provider.describe().id === "composio")!;
+      const { provider } = await prepareManagedConnectorForTransaction(wrapper);
+
+      expect(await provider?.needsReconnect?.(context, "gmail")).toBe(reconnect ?? false);
+      if (reconnect !== undefined) {
+        expect(needsReconnect).toHaveBeenCalledExactlyOnceWith(context, "gmail");
+      } else {
+        expect(needsReconnect).not.toHaveBeenCalled();
+      }
+    },
+  );
   it("exposes the prepared provider's account resolution bound to that provider", async () => {
     const f = fixture();
     class AccountAdapter {
@@ -193,6 +232,7 @@ describe("integration credentials with Infisical", () => {
     };
     const adapter = {
       listConnectedExternalIds: vi.fn(async () => []),
+      listReconnectRefs: vi.fn(async () => []),
     } as unknown as ManagedConnectorProvider;
     const factory = vi.fn(() => adapter);
     const settings = new IntegrationProviderSettings(

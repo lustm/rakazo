@@ -1,4 +1,4 @@
-import { BOT_COLORS } from "@rakazo/contracts";
+import { BOT_COLOR_LIST, BOT_COLORS } from "@rakazo/contracts";
 import {
   ORGANIC_AVATAR_FAMILY_COUNT,
   ORGANIC_AVATAR_HEART_FAMILY,
@@ -86,47 +86,84 @@ describe("chooseBotAvatar", () => {
   );
 
   it("gives a new bot the organic family and colour the user's bots use least", () => {
-    const existing = idsForFamilies([0, 1, 2, 3, 4, 5, 6, 7, 8]).map((id, index) => ({
-      id,
-      color: BOT_COLORS[index % 6]!,
-    }));
+    const existing = idsForFamilies(ORGANIC_AVATAR_LOOKS.filter((look) => look !== 12)).map(
+      (id, index) => ({
+        id,
+        color: BOT_COLORS[index % 6]!,
+      }),
+    );
     for (let seed = 1; seed <= 20; seed++) {
       const chosen = chooseBotAvatar(existing, undefined, { random: seeded(seed), now: 0 });
-      expect(organicAvatarFamily(chosen.id)).toBe(9);
-      expect(chosen.color).toBe(BOT_COLORS[6]);
+      expect(organicAvatarFamily(chosen.id)).toBe(12);
+      expect(BOT_COLORS.slice(6)).toContain(chosen.color);
       expect(chosen.id).toMatch(/^c[a-z0-9]{24}$/);
     }
   });
 
+  it("counts a colour saved as its earlier value as the palette colour it shows", () => {
+    const blue = BOT_COLOR_LIST.find((color) => color.id === "blue")!;
+    const palette = BOT_COLOR_LIST.filter((color) => color.id !== "black");
+    const families = idsForFamilies([...ORGANIC_AVATAR_LOOKS, ...ORGANIC_AVATAR_LOOKS]);
+    // Every colour but blue is used once; blue is used once through its earlier value.
+    const existing = palette.map((color, index) => ({
+      id: families[index]!,
+      color: color.id === "blue" ? blue.previousHex! : color.hex,
+    }));
+    existing.push({ id: families[palette.length]!, color: blue.hex });
+    for (let seed = 1; seed <= 20; seed++) {
+      const chosen = chooseBotAvatar(existing, undefined, { random: seeded(seed), now: 0 });
+      expect(chosen.color).not.toBe(blue.hex);
+    }
+  });
+
+  it("can assign every distinct non-heart look", () => {
+    for (const look of ORGANIC_AVATAR_LOOKS) {
+      const existing = idsForFamilies(ORGANIC_AVATAR_LOOKS.filter((other) => other !== look)).map(
+        (id) => ({
+          id,
+          color: BOT_COLORS[0]!,
+        }),
+      );
+      const chosen = chooseBotAvatar(existing, undefined, { random: seeded(1), now: 0 });
+      expect(organicAvatarLook(organicAvatarFamily(chosen.id))).toBe(look);
+    }
+  });
+
   it("breaks a colour tie away from colours already on the same look", () => {
-    // The round look is least used; orange and blue are the least-used colours, and orange is
-    // already on a round bot.
+    // The round look is least used; two colours tie as least used, and the first is already on
+    // a round bot.
+    const [onRound, elsewhere, ...spread] = BOT_COLORS;
     const [round] = idsForFamilies([0]);
-    const twice = ORGANIC_AVATAR_LOOKS.filter((look) => look !== 0);
-    const others = idsForFamilies([...twice, ...twice]);
-    const spread = ["#3EC5A8", "#6A6BF5", "#9B5CF6", "#F2622A", "#D9508A"];
+    const nonRound = ORGANIC_AVATAR_LOOKS.filter((look) => look !== 0);
+    const others = idsForFamilies(
+      Array.from(
+        { length: Math.ceil((nonRound.length + 1) / spread.length) * spread.length + 1 },
+        (_, index) => nonRound[index % nonRound.length]!,
+      ),
+    );
     const existing = [
-      { id: round!, color: "#F5A03C" },
-      { id: others[0]!, color: "#3B82F6" },
+      { id: round!, color: onRound! },
+      { id: others[0]!, color: elsewhere! },
       ...others.slice(1).map((id, index) => ({ id, color: spread[index % spread.length]! })),
     ];
     for (let seed = 1; seed <= 20; seed++) {
       const chosen = chooseBotAvatar(existing, undefined, { random: seeded(seed), now: 0 });
       expect(organicAvatarLook(organicAvatarFamily(chosen.id))).toBe(0);
-      expect(chosen.color).toBe("#3B82F6");
+      expect(chosen.color).toBe(elsewhere);
     }
   });
 
   it("does not count bots that show a picture or an Avatar Studio shape", () => {
+    const [common, shapedColor] = BOT_COLORS;
     const [shaped, pictured] = idsForFamilies([0, 0]);
-    const others = idsForFamilies([1, 2, 3, 4, 5, 6, 7, 8, 9]).map((id) => ({
+    const others = idsForFamilies(ORGANIC_AVATAR_LOOKS.filter((look) => look !== 0)).map((id) => ({
       id,
-      color: "#3EC5A8",
+      color: common!,
     }));
     const chosen = chooseBotAvatar(
       [
         ...others,
-        { id: shaped!, color: "#F5A03C::shape_2" },
+        { id: shaped!, color: `${shapedColor}::shape_2` },
         { id: pictured!, color: "data:image/png;base64,AAAA" },
       ],
       undefined,
@@ -134,8 +171,8 @@ describe("chooseBotAvatar", () => {
     );
     expect(organicAvatarFamily(chosen.id)).toBe(0);
     // The shaped bot's colour still counts; the picture has none.
-    expect(chosen.color).not.toBe("#3EC5A8");
-    expect(chosen.color).not.toBe("#F5A03C");
+    expect(chosen.color).not.toBe(common);
+    expect(chosen.color).not.toBe(shapedColor);
   });
 
   it("draws the organic family the caller picked, even one the user's bots already use", () => {
@@ -160,7 +197,7 @@ describe("chooseBotAvatar", () => {
       Array.from({ length: ORGANIC_AVATAR_FAMILY_COUNT }, (_, family) => family),
     );
     const balanced = ids
-      .filter((id) => organicAvatarFamily(id) !== 8)
+      .filter((id) => organicAvatarFamily(id) !== ORGANIC_AVATAR_HEART_FAMILY)
       .map((id, index) => ({
         id,
         color: BOT_COLORS[index % BOT_COLORS.length]!,

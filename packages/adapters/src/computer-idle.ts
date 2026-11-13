@@ -14,15 +14,17 @@ import {
   WorkspaceTooLargeError,
 } from "@rakazo/adapter-kit";
 import { COMPUTER_ALLOWANCE_USED_ERROR } from "@rakazo/contracts";
-import { QUEUE_HOLDING_RUN_STATUSES, withAbort } from "@rakazo/core";
+import { COMPUTER_USING_RUNS, QUEUE_HOLDING_RUN_STATUSES, withAbort } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import {
   appendEventInTransaction,
   clearEndedExecutionRunBinding,
   createGroupRepos,
   createThreadMessageInTransaction,
+  isUniqueViolation,
   recordComputerRunEnd,
   recordComputerRunSeen,
+  THREAD_LOCK_TRANSACTION_OPTIONS,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { activeCodingAgent } from "./coding-agent-activity.js";
@@ -592,6 +594,7 @@ export async function sleepComputerIfIdle(
           runningSince: null,
           controlHolder: "none",
           controlLeaseId: null,
+          controlUserId: null,
           controlLeaseExpiresAt: null,
           controlBotId: null,
           controlRunId: null,
@@ -609,6 +612,17 @@ export async function sleepComputerIfIdle(
         provider: computer.kind,
         reason: "damaged",
         error,
+      });
+    } else if (
+      error instanceof WorkspaceTooLargeError &&
+      (await providerKeepsHome(deps.sandbox, ref).catch(() => false))
+    ) {
+      // The provider's disk is the source of truth and survives the stop; this save is only a
+      // backup, and the next start prefers the newer disk over the older backup.
+      getLogger().warn("computer.checkpoint_skipped", {
+        "computer.id": computerId,
+        provider: computer.kind,
+        reason: sleepDeferReason(error),
       });
     } else {
       await deps.prisma.computer.updateMany({
@@ -685,6 +699,7 @@ export async function sleepComputerIfIdle(
       runningSince: null,
       controlHolder: "none",
       controlLeaseId: null,
+      controlUserId: null,
       controlLeaseExpiresAt: null,
       controlBotId: null,
       controlRunId: null,
@@ -745,6 +760,7 @@ async function suspendStoppedComputer(
       runningSince: null,
       controlHolder: "none",
       controlLeaseId: null,
+      controlUserId: null,
       controlLeaseExpiresAt: null,
       controlBotId: null,
       controlRunId: null,
@@ -867,15 +883,25 @@ async function postComputerNote(
           payload: { messageId: message.id, role: "system", blocks },
         });
         return event.seq;
-      });
+      }, THREAD_LOCK_TRANSACTION_OPTIONS);
       if (seq !== undefined) await deps.events.notify(threadId, seq).catch(() => undefined);
     } catch (cause) {
       // A competing worker already wrote the same nonce. Other failures are retried next tick.
-      if (!(cause && typeof cause === "object" && "code" in cause && cause.code === "P2002")) {
+      if (!isUniqueViolation(cause)) {
         getLogger().error("computer.notice_failed", cause);
       }
     }
   }
+}
+
+/** Whether the provider running `computer` keeps its disk when it stops. */
+export function providerKeepsHome(
+  sandbox: SandboxProvider,
+  computer: ComputerRef,
+): Promise<boolean> {
+  return (
+    sandbox.keepsHome?.(computer) ?? Promise.resolve(sandbox.describe().capabilities.persistentHome)
+  );
 }
 
 /** A running computer, or one whose suspend claim was abandoned while it was still up. */
@@ -890,8 +916,8 @@ function mayNeedSleep(computer: { state: string; updatedAt: Date }): boolean {
 /**
  * A provider that is rate limiting, too busy to answer, or that can only bring the sandbox back
  * from its own snapshot cannot be checkpointed or stopped now, and a workspace over the save
- * limits cannot be saved, so stopping it would lose its files. The caller has already scheduled
- * the next idle check, so the job succeeds instead of spending its retries on the same answer.
+ * limits cannot be saved where the provider keeps no disk, so stopping it would lose its files.
+ * The caller has already scheduled the next idle check, so the job succeeds instead of spending its retries on the same answer.
  */
 function deferSleep(error: unknown, computer: { id: string; kind: string }): boolean {
   const reason = sleepDeferReason(error);
@@ -996,6 +1022,7 @@ function findActiveRun(
   return prisma.run.findFirst({
     where: {
       bot: { computerId },
+      ...COMPUTER_USING_RUNS,
       status: { in: statuses as (typeof QUEUE_HOLDING_RUN_STATUSES)[number][] },
       ...(liveLeaseOnly ? { leaseExpiresAt: { gt: new Date(Date.now()) } } : {}),
     },
